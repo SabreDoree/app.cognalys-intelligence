@@ -372,6 +372,23 @@ h1 {
   font-weight: 650;
 }
 
+.ask .chat-red {
+  color: #b42332;
+  font-weight: 650;
+}
+
+.ask .chat-code {
+  display: inline;
+  padding: 2px 5px;
+  border: 1px solid #d8dfeb;
+  border-radius: 5px;
+  background: #e5eaf3;
+  color: #34445d;
+  font: 0.9em/1.5 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  white-space: break-spaces;
+  overflow-wrap: anywhere;
+}
+
 .reply {
   background: #e3edff;
   justify-self: end;
