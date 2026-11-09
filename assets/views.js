@@ -31,13 +31,30 @@ const Views = (() => {
         const marker = markers.find(token => input.startsWith(token, i));
         if (marker === closing) return {html, next: i + marker.length, closed: true};
         if (marker === '`') {
-          const end = input.indexOf('`', i + 1);
-          if (end !== -1) {
-            const codeText = input.slice(i + 1, end);
-            html += renderWrappedFormat(codeText) ?? `<code class="chat-code">${esc(codeText)}</code>`;
-            i = end + 1;
-            continue;
+          // Parse an entire run of backticks, not each backtick separately.
+          // Both `texte` and ``texte`` form one code span.
+          let runEnd = i;
+          while (input[runEnd] === '`') runEnd++;
+          const runLength = runEnd - i;
+          let searchFrom = runEnd;
+          let matched = false;
+          while (searchFrom < input.length) {
+            const next = input.indexOf('`', searchFrom);
+            if (next === -1) break;
+            let closingEnd = next;
+            while (input[closingEnd] === '`') closingEnd++;
+            if (closingEnd - next === runLength) {
+              const codeText = input.slice(runEnd, next);
+              if (codeText.trim()) {
+                html += renderWrappedFormat(codeText) ?? `<code class="chat-code">${esc(codeText)}</code>`;
+                i = closingEnd;
+                matched = true;
+                break;
+              }
+            }
+            searchFrom = closingEnd;
           }
+          if (matched) continue;
         }
         if (marker && marker !== '`' && depth < 12 && input.indexOf(marker, i + marker.length) !== -1) {
           const inner = parse(i + marker.length, marker, depth + 1);
