@@ -10,7 +10,7 @@ const Views = (() => {
       '$': html => `<span class="chat-yellow">${html}</span>`,
       '__': html => `<u>${html}</u>`,
       '€€': html => `<span class="chat-green">${html}</span>`,
-      '&': html => `<span class="chat-red">${html}</span>`
+      '&&': html => `<span class="chat-red">${html}</span>`
     };
     // Code spans stay literal: formatting markers inside them are never interpreted.
     const markers = ['`', ...Object.keys(formats)];
