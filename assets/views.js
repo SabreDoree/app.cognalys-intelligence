@@ -7,7 +7,7 @@ const Views = (() => {
     const input = String(text ?? '');
     const formats = {
       '**': html => `<strong>${html}</strong>`,
-      '$': html => `<span class="chat-yellow">${html}</span>`,
+      [String.fromCharCode(36, 36)]: html => `<span class="chat-yellow">${html}</span>`,
       '__': html => `<u>${html}</u>`,
       '€€': html => `<span class="chat-green">${html}</span>`,
       '&&': html => `<span class="chat-red">${html}</span>`
