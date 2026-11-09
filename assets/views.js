@@ -2,6 +2,41 @@
 const Views = (() => {
   const icon = Icons.svg;
   const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;'})[c]);
+
+  function formatAssistant(text) {
+    const input = String(text ?? '');
+    const formats = {
+      '**': html => `<strong>${html}</strong>`,
+      '$': html => `<span class="chat-yellow">${html}</span>`,
+      '__': html => `<u>${html}</u>`,
+      '€€': html => `<span class="chat-green">${html}</span>`
+    };
+    const markers = Object.keys(formats);
+    function parse(start, closing, depth) {
+      let html = '', i = start;
+      while (i < input.length) {
+        const marker = markers.find(token => input.startsWith(token, i));
+        if (marker === closing) return {html, next: i + marker.length, closed: true};
+        if (marker && depth < 12 && input.indexOf(marker, i + marker.length) !== -1) {
+          const inner = parse(i + marker.length, marker, depth + 1);
+          if (inner.closed) {
+            html += formats[marker](inner.html);
+            i = inner.next;
+            continue;
+          }
+        }
+        if (marker) {
+          html += esc(marker);
+          i += marker.length;
+        } else {
+          html += esc(input[i]);
+          i++;
+        }
+      }
+      return {html, next: i, closed: false};
+    }
+    return parse(0, null, 0).html;
+  }
   const back = (to, label) => `<a class="back" href="#${to}">${icon('back',16)}${label}</a>`;
   function wave() {
     const bars=[8,13,20,11,25,38,26,17,36,48,61,37,22,40,68,88,72,46,30,49,79,100,70,43,58,83,60,39,24,46,65,44,24,36,52,30,17,24,35,20,12,18,10,6];
@@ -15,7 +50,7 @@ const Views = (() => {
   function conversation(s) {
     const history = s.messages.map(m => m.audioUrl
       ? `<div class="reply voice-message"><strong>Message vocal</strong><audio controls aria-label="Écouter le message vocal" src="${esc(m.audioUrl)}"></audio></div>`
-      : `<p class="${m.user ? 'reply' : 'ask'}">${esc(m.text)}</p>`).join('');
+      : `<p class="${m.user ? 'reply' : 'ask'}">${m.user ? esc(m.text) : formatAssistant(m.text)}</p>`).join('');
     const busy = s.pending || ['permission','recording','stopping','transcribing'].includes(s.audio);
     const recording = s.audio === 'recording';
     return back('accueil','Modes de création')+`<h1>Audio ou chat</h1><p class="lead">Dictez les détails de l’appel ou écrivez votre message. La note vocale est transmise automatiquement à l’assistant après transcription.</p>

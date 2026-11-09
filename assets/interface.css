@@ -362,6 +362,16 @@ h1 {
   justify-self: start;
 }
 
+.ask .chat-yellow {
+  color: #946800;
+  font-weight: 650;
+}
+
+.ask .chat-green {
+  color: #167447;
+  font-weight: 650;
+}
+
 .reply {
   background: #e3edff;
   justify-self: end;
