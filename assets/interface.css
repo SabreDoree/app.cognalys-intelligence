@@ -368,6 +368,23 @@ h1 {
   color: #234676;
 }
 
+.voice-message {
+  width: min(320px, 90%);
+  display: grid;
+  gap: 8px;
+  border-bottom-right-radius: 5px;
+}
+
+.voice-message strong {
+  font-size: 13px;
+}
+
+.voice-message audio {
+  display: block;
+  width: 100%;
+  height: 40px;
+}
+
 .composer {
   display: flex;
   gap: 8px;

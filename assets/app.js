@@ -30,7 +30,7 @@
     const chat = s;
     if (chat.pending) return;
     chat.sessionId ??= crypto.randomUUID();
-    chat.messages.push({user:true, text:clip ? (text ? "Note vocale · " + text : "Note vocale") : text});
+    chat.messages.push({user:true, text:clip ? '' : text, audioUrl:clip?.url});
     chat.pending = true;
     chat.error = chat.draft = '';
     render(false);
@@ -50,7 +50,7 @@
       const reply = item?.output ?? item?.text ?? (typeof item === 'string' ? item : null);
       if (typeof reply !== 'string' || !reply.trim()) throw new Error('Réponse vide ou illisible');
       chat.messages.push({user:false,text:reply});
-      if (clip) { URL.revokeObjectURL(clip.url); chat.clip = null; }
+      if (clip) chat.clip = null;
       chat.review = true;
       chat.fields.notes ??= text;
     } catch (error) {
@@ -176,7 +176,12 @@
       render(false);
     }
   }
-  function reset(){cancelCapture();if(s.clip) URL.revokeObjectURL(s.clip.url);s=fresh();}
+  function reset(){
+    cancelCapture();
+    const urls = new Set([s.clip?.url, ...s.messages.map(message => message.audioUrl)]);
+    urls.forEach(url => { if (url) URL.revokeObjectURL(url); });
+    s=fresh();
+  }
   window.addEventListener('pagehide',cancelCapture);
   document.addEventListener('click',event=>{
     if(event.target.closest('.skip')){event.preventDefault();main.focus();return;}
