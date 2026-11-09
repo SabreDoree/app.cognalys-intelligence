@@ -612,12 +612,13 @@ textarea {
     max-width: 86%;
   }
   .signal {
-    left: 58%;
-    opacity: .48;
+    inset: 12px 0 auto 56%;
+    height: 62px;
+    opacity: .68;
   }
   .signal .wave {
     gap: 2px;
-    height: 84px;
+    height: 46px;
   }
   .form-option {
     padding: 19px 15px;
