@@ -14,6 +14,17 @@ const Views = (() => {
     };
     // Code spans stay literal: formatting markers inside them are never interpreted.
     const markers = ['`', ...Object.keys(formats)];
+    // If the AI mistakenly wraps an entire formatted token in backticks,
+    // display the requested style rather than treating it as a code literal.
+    function renderWrappedFormat(value) {
+      for (const marker of Object.keys(formats)) {
+        if (value.startsWith(marker) && value.endsWith(marker) &&
+            value.length > marker.length * 2) {
+          return formats[marker](esc(value.slice(marker.length, -marker.length)));
+        }
+      }
+      return null;
+    }
     function parse(start, closing, depth) {
       let html = '', i = start;
       while (i < input.length) {
@@ -22,7 +33,8 @@ const Views = (() => {
         if (marker === '`') {
           const end = input.indexOf('`', i + 1);
           if (end !== -1) {
-            html += `<code class="chat-code">${esc(input.slice(i + 1, end))}</code>`;
+            const codeText = input.slice(i + 1, end);
+            html += renderWrappedFormat(codeText) ?? `<code class="chat-code">${esc(codeText)}</code>`;
             i = end + 1;
             continue;
           }
