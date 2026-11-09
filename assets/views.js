@@ -14,13 +14,13 @@ const Views = (() => {
   }
   function conversation(s) {
     const stage=s.audio;
-    const history=s.answers.map((a,i)=>`<p class="ask">${esc(QuoteData.prompts[i][1])}</p><p class="reply">${esc(a)}</p>`).join('');
-    const done=s.answers.length===QuoteData.prompts.length;
+    const history = s.messages.map(m => `<p class="${m.user ? 'reply' : 'ask'}">${esc(m.text)}</p>`).join('');
     return back('accueil','Modes de création')+`<h1>Audio ou chat</h1><p class="lead">Utilisez l’exemple audio ou répondez par écrit.</p>
       <section class="box chat"><div class="chat-title"><img src="./assets/symbole.svg" alt="">Assistant devis</div>
-      <div class="thread">${history}${stage==='analysé' ? `<p class="ask"><b>Transcription de l’exemple</b><br>${esc(QuoteData.transcript)}</p>` : `<p class="ask">${done ? 'Les réponses sont prêtes. Vérifiez les informations avant de préparer le devis.' : esc(QuoteData.prompts[s.answers.length][1])}</p>`}</div>
-      ${done || stage==='analysé' ? '<a class="primary" href="#verification">Vérifier les informations →</a>' : `<form id="chat-form"><label for="answer">Votre réponse</label><div class="composer"><input id="answer" name="answer" placeholder="Écrivez votre réponse…" required maxlength="2000" ${stage==='actif'||stage==='arrêté'?'disabled':''}><button class="primary" ${stage==='actif'||stage==='arrêté'?'disabled':''} aria-label="Envoyer la réponse">${icon('send',19)}</button></div></form>
-      ${!s.answers.length ? `<div class="audio"><div><strong>Note vocale simulée</strong><small>Le micro de votre appareil reste désactivé.</small></div>
+      <div class="thread">${history}${stage==='analysé' ? `<p class="ask"><b>Transcription de l’exemple</b><br>${esc(QuoteData.transcript)}</p>` : (!history ? '<p class="ask">Décrivez votre demande de devis.</p>' : '')}${s.pending ? '<p role="status">Réponse en cours…</p>' : ''}${s.error ? `<p role="alert">${esc(s.error)}</p>` : ''}</div>
+      ${stage==='analysé' ? '<a class="primary" href="#verification">Vérifier les informations →</a>' : `<form id="chat-form"><label for="answer">Votre réponse</label><div class="composer"><input id="answer" name="answer" placeholder="Écrivez votre réponse…" required maxlength="2000" value="${esc(s.draft)}" ${s.pending||stage==='actif'||stage==='arrêté'?'disabled':''}><button class="primary" ${s.pending||stage==='actif'||stage==='arrêté'?'disabled':''} aria-label="Envoyer la réponse">${icon('send',19)}</button></div></form>
+      ${s.review && !s.pending ? '<a class="back" href="#verification">Passer au brouillon →</a>' : ''}
+      ${!s.messages.length ? `<div class="audio"><div><strong>Note vocale simulée</strong><small>Le micro de votre appareil reste désactivé.</small></div>
       ${stage==='actif' ? `<div class="recording">${wave()}<span id="timer">${s.timer}</span></div><button class="secondary" data-act="stop">${icon('stop',16)}Arrêter</button>` : stage==='arrêté' ? '<button class="primary" data-act="analyse">Analyser la demande</button>' : `<button class="secondary" data-act="record">${icon('mic',17)}Démarrer l’exemple audio</button>`}</div>` : ''}`}</section>`;
   }
   function field(r,key,label,type='text',options) {
