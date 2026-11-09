@@ -13,15 +13,16 @@ const Views = (() => {
       <a class="form-option" href="#formulaire"><span class="form-icon">${icon('form',25)}</span><span><strong>Formulaire rapide</strong><small>Renseignez directement les informations du devis.</small></span>${icon('right',20)}</a>`;
   }
   function conversation(s) {
-    const stage=s.audio;
     const history = s.messages.map(m => `<p class="${m.user ? 'reply' : 'ask'}">${esc(m.text)}</p>`).join('');
-    return back('accueil','Modes de création')+`<h1>Audio ou chat</h1><p class="lead">Utilisez l’exemple audio ou répondez par écrit.</p>
+    const busy = s.pending || ['permission','recording','stopping'].includes(s.audio);
+    const recording = s.audio === 'recording';
+    return back('accueil','Modes de création')+`<h1>Audio ou chat</h1><p class="lead">Dictez les détails de l’appel ou écrivez votre message.</p>
       <section class="box chat"><div class="chat-title"><img src="./assets/symbole.svg" alt="">Assistant devis</div>
-      <div class="thread">${history}${stage==='analysé' ? `<p class="ask"><b>Transcription de l’exemple</b><br>${esc(QuoteData.transcript)}</p>` : (!history ? '<p class="ask">Décrivez votre demande de devis.</p>' : '')}${s.pending ? '<p role="status">Réponse en cours…</p>' : ''}${s.error ? `<p role="alert">${esc(s.error)}</p>` : ''}</div>
-      ${stage==='analysé' ? '<a class="primary" href="#verification">Vérifier les informations →</a>' : `<form id="chat-form"><label for="answer">Votre réponse</label><div class="composer"><input id="answer" name="answer" placeholder="Écrivez votre réponse…" required maxlength="2000" value="${esc(s.draft)}" ${s.pending||stage==='actif'||stage==='arrêté'?'disabled':''}><button class="primary" ${s.pending||stage==='actif'||stage==='arrêté'?'disabled':''} aria-label="Envoyer la réponse">${icon('send',19)}</button></div></form>
-      ${s.review && !s.pending ? '<a class="back" href="#verification">Passer au brouillon →</a>' : ''}
-      ${!s.messages.length ? `<div class="audio"><div><strong>Note vocale simulée</strong><small>Le micro de votre appareil reste désactivé.</small></div>
-      ${stage==='actif' ? `<div class="recording">${wave()}<span id="timer">${s.timer}</span></div><button class="secondary" data-act="stop">${icon('stop',16)}Arrêter</button>` : stage==='arrêté' ? '<button class="primary" data-act="analyse">Analyser la demande</button>' : `<button class="secondary" data-act="record">${icon('mic',17)}Démarrer l’exemple audio</button>`}</div>` : ''}`}</section>`;
+      <div class="thread">${history || '<p class="ask">Décrivez votre demande de devis.</p>'}${s.pending ? '<p role="status">Réponse en cours…</p>' : ''}${s.error ? `<p role="alert">${esc(s.error)}</p>` : ''}</div>
+      <div class="audio">${s.clip ? `<div><strong>Votre note vocale</strong><audio controls src="${s.clip.url}" style="display:block;max-width:100%"></audio></div><button class="secondary" data-act="discard" ${busy?'disabled':''}>Supprimer la note</button>` :
+        `<button type="button" class="secondary" data-act="${recording?'stop':'record'}" ${busy&&!recording?'disabled':''}>${icon(recording?'stop':'mic',17)}${recording?'Arrêter':s.audio==='permission'?'Autorisation du micro…':s.audio==='stopping'?'Préparation…':'Enregistrer une note vocale'}</button>${recording?`<div class="recording">${wave()}<span id="timer">00:00</span></div>`:''}`}</div>
+      ${s.clip && !s.draft ? '<p>Aucune transcription disponible. Dictez avec le clavier ou ajoutez le texte pour que le chatbot comprenne la note.</p>' : ''}<form id="chat-form"><label for="answer">${s.clip?'Transcription ou précisions':'Votre réponse'}</label><div class="composer"><input id="answer" name="answer" placeholder="${s.clip?'Ajoutez ou corrigez le texte…':'Écrivez votre réponse…'}" required value="${esc(s.draft)}" ${busy?'disabled':''}><button class="primary" ${busy?'disabled':''} aria-label="${s.clip?'Envoyer la note vocale':'Envoyer la réponse'}">${icon('send',19)}</button></div></form>
+      ${s.review && !busy ? '<a class="back" href="#verification">Passer au brouillon →</a>' : ''}</section>`;
   }
   function field(r,key,label,type='text',options) {
     const value=r[key]||'';
