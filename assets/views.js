@@ -9,15 +9,25 @@ const Views = (() => {
       '**': html => `<strong>${html}</strong>`,
       '$': html => `<span class="chat-yellow">${html}</span>`,
       '__': html => `<u>${html}</u>`,
-      '€€': html => `<span class="chat-green">${html}</span>`
+      '€€': html => `<span class="chat-green">${html}</span>`,
+      '&': html => `<span class="chat-red">${html}</span>`
     };
-    const markers = Object.keys(formats);
+    // Code spans stay literal: formatting markers inside them are never interpreted.
+    const markers = ['`', ...Object.keys(formats)];
     function parse(start, closing, depth) {
       let html = '', i = start;
       while (i < input.length) {
         const marker = markers.find(token => input.startsWith(token, i));
         if (marker === closing) return {html, next: i + marker.length, closed: true};
-        if (marker && depth < 12 && input.indexOf(marker, i + marker.length) !== -1) {
+        if (marker === '`') {
+          const end = input.indexOf('`', i + 1);
+          if (end !== -1) {
+            html += `<code class="chat-code">${esc(input.slice(i + 1, end))}</code>`;
+            i = end + 1;
+            continue;
+          }
+        }
+        if (marker && marker !== '`' && depth < 12 && input.indexOf(marker, i + marker.length) !== -1) {
           const inner = parse(i + marker.length, marker, depth + 1);
           if (inner.closed) {
             html += formats[marker](inner.html);
