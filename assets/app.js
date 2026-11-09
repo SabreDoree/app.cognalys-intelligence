@@ -70,6 +70,7 @@
   async function transcribe(clip) {
     const chat = s;
     if (!clip || chat.audio === 'transcribing') return;
+    let messageToSend = '';
     chat.sessionId ??= crypto.randomUUID();
     chat.audio = 'transcribing';
     chat.transcribed = false;
@@ -92,6 +93,7 @@
       if (s === chat && chat.clip === clip) {
         chat.draft = [chat.draft.trim(), transcript.trim()].filter(Boolean).join(' ');
         chat.transcribed = true;
+        messageToSend = chat.draft;
       }
     } catch (error) {
       if (s === chat && chat.clip === clip) chat.error = 'Transcription indisponible. Réessayez ou écrivez votre message. ' +
@@ -100,9 +102,10 @@
       clearTimeout(timeout);
       if (s === chat && chat.clip === clip) {
         chat.audio = 'idle';
-        if (page === 'conversation') render(false);
+        if (page === 'conversation' && !messageToSend) render(false);
       }
     }
+    if (messageToSend && s === chat && chat.clip === clip) sendMessage(messageToSend, clip);
   }
   function cancelCapture() {
     if (!capture) return;
