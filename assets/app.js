@@ -3,7 +3,7 @@
   const main=document.querySelector('main');
   const paths=['accueil','conversation','verification','formulaire','devis'];
   let page, capture, toastClock;
-  const fresh=()=>({fields:{},messages:[],sessionId:null,pending:false,error:"",draft:"",audio:'idle',timer:'00:00',review:false,stage:'draft',prepared:false});
+  const fresh=()=>({fields:{},messages:[],sessionId:null,pending:false,error:"",draft:"",audio:'idle',transcribed:false,timer:'00:00',review:false,stage:'draft',prepared:false});
   let s=fresh();
   function go(path){ location.hash=path; }
   function toast(message){
@@ -37,16 +37,10 @@
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 90000);
     try {
-      const payload = {action:'sendMessage', sessionId:chat.sessionId, chatInput:text || 'Écoute et traite la note vocale jointe.'};
-      let body = JSON.stringify(payload);
-      if (clip) {
-        body = new FormData();
-        Object.entries(payload).forEach(([key,value]) => body.append(key,value));
-        body.append('files', clip.blob, clip.name);
-      }
+      const body = JSON.stringify({action:'sendMessage', sessionId:chat.sessionId, chatInput:text});
       const response = await fetch('https://n8n.cognalys-intelligence.fr/webhook/759b9f24-ac69-4c11-9b44-f3032ea8a444/chat', {
         method: 'POST',
-        headers: clip ? {} : {'Content-Type':'application/json'},
+        headers: {'Content-Type':'application/json'},
         body,
         signal: controller.signal
       });
@@ -73,6 +67,43 @@
       }
     }
   }
+  async function transcribe(clip) {
+    const chat = s;
+    if (!clip || chat.audio === 'transcribing') return;
+    chat.sessionId ??= crypto.randomUUID();
+    chat.audio = 'transcribing';
+    chat.transcribed = false;
+    chat.error = '';
+    render(false);
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 90000);
+    try {
+      const body = new FormData();
+      body.append('audio', clip.blob, clip.name);
+      body.append('sessionId', chat.sessionId);
+      const response = await fetch('https://n8n.cognalys-intelligence.fr/webhook/transcription-audio-openrouter', {
+        method: 'POST', body, signal: controller.signal
+      });
+      if (!response.ok) throw new Error('HTTP ' + response.status);
+      const data = await response.json();
+      const item = Array.isArray(data) ? data[0] : data;
+      const transcript = item?.transcription ?? item?.transcript ?? item?.text;
+      if (typeof transcript !== 'string' || !transcript.trim()) throw new Error('Transcription vide');
+      if (s === chat && chat.clip === clip) {
+        chat.draft = [chat.draft.trim(), transcript.trim()].filter(Boolean).join(' ');
+        chat.transcribed = true;
+      }
+    } catch (error) {
+      if (s === chat && chat.clip === clip) chat.error = 'Transcription indisponible. Réessayez ou écrivez votre message. ' +
+        (error.message.startsWith('HTTP ') ? error.message : '');
+    } finally {
+      clearTimeout(timeout);
+      if (s === chat && chat.clip === clip) {
+        chat.audio = 'idle';
+        if (page === 'conversation') render(false);
+      }
+    }
+  }
   function cancelCapture() {
     if (!capture) return;
     const old = capture;
@@ -96,7 +127,7 @@
       s.error = 'Enregistrement indisponible dans ce navigateur. Utilisez la dictée du clavier ou écrivez votre message.';
       return render(false);
     }
-    const job = {parts:[], transcript:'', previous:s.draft};
+    const job = {parts:[]};
     capture = job;
     s.audio = 'permission';
     s.error = '';
@@ -106,16 +137,6 @@
       if (capture !== job) { stream.getTracks().forEach(t => t.stop()); return; }
       job.stream = stream;
       const recorder = job.recorder = new MediaRecorder(stream);
-      const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-      if (Recognition) {
-        const speech = job.speech = new Recognition();
-        speech.lang = 'fr-FR';
-        speech.continuous = true;
-        speech.interimResults = true;
-        speech.onresult = event => {
-          job.transcript = Array.from(event.results, r => r[0].transcript).join(' ').trim();
-        };
-      }
       recorder.ondataavailable = event => { if(event.data.size) job.parts.push(event.data); };
       recorder.onerror = () => {
         if (capture !== job) return;
@@ -131,12 +152,11 @@
         if (blob.size) {
           const ext = type.includes('mp4')?'m4a':type.includes('ogg')?'ogg':'webm';
           s.clip = {blob, name:'note-vocale.'+ext, url:URL.createObjectURL(blob)};
-          s.draft = [job.previous,job.transcript].filter(Boolean).join(' ');
+          transcribe(s.clip);
         } else s.error = 'Aucun son enregistré. Réessayez.';
-        render(false);
+        if (!blob.size) render(false);
       };
       recorder.start();
-      try { job.speech?.start(); } catch { job.speech = null; }
       s.audio = 'recording';
       render(false);
       const start = Date.now();
@@ -163,7 +183,8 @@
     switch(ctl.dataset.act){
       case 'record': record(); break;
       case 'stop': stopRecording(); break;
-      case 'discard': URL.revokeObjectURL(s.clip.url);s.clip=null;render(false);break;
+      case 'discard': URL.revokeObjectURL(s.clip.url);s.clip=null;s.transcribed=false;s.error='';render(false);break;
+      case 'transcribe': transcribe(s.clip);break;
       case 'validate':s.stage='valid';render();toast('Validation simulée.');break;
       case 'send':s.stage='sent';render();toast('Envoi simulé. Aucun email envoyé.');break;
       case 'pdf':toast('Export simulé. Aucun fichier PDF créé.');break;
