@@ -378,14 +378,15 @@ h1 {
 }
 
 .ask .chat-code {
-  display: inline;
-  padding: 2px 5px;
+  display: inline-block;
+  max-width: 100%;
+  padding: 2px 6px;
   border: 1px solid #d8dfeb;
   border-radius: 5px;
   background: #e5eaf3;
   color: #34445d;
   font: 0.9em/1.5 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  white-space: break-spaces;
+  white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
 
