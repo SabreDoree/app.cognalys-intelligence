@@ -14,14 +14,14 @@ const Views = (() => {
   }
   function conversation(s) {
     const history = s.messages.map(m => `<p class="${m.user ? 'reply' : 'ask'}">${esc(m.text)}</p>`).join('');
-    const busy = s.pending || ['permission','recording','stopping'].includes(s.audio);
+    const busy = s.pending || ['permission','recording','stopping','transcribing'].includes(s.audio);
     const recording = s.audio === 'recording';
     return back('accueil','Modes de création')+`<h1>Audio ou chat</h1><p class="lead">Dictez les détails de l’appel ou écrivez votre message.</p>
       <section class="box chat"><div class="chat-title"><img src="./assets/symbole.svg" alt="">Assistant devis</div>
       <div class="thread">${history || '<p class="ask">Décrivez votre demande de devis.</p>'}${s.pending ? '<p role="status">Réponse en cours…</p>' : ''}${s.error ? `<p role="alert">${esc(s.error)}</p>` : ''}</div>
-      <div class="audio">${s.clip ? `<div><strong>Votre note vocale</strong><audio controls src="${s.clip.url}" style="display:block;max-width:100%"></audio></div><button class="secondary" data-act="discard" ${busy?'disabled':''}>Supprimer la note</button>` :
+      <div class="audio">${s.clip ? `<div><strong>Votre note vocale</strong><audio controls src="${s.clip.url}" style="display:block;max-width:100%"></audio></div><button class="secondary" data-act="discard" ${busy?'disabled':''}>Supprimer la note</button>${s.error && !busy ? '<button type="button" class="secondary" data-act="transcribe">Réessayer la transcription</button>' : ''}` :
         `<button type="button" class="secondary" data-act="${recording?'stop':'record'}" ${busy&&!recording?'disabled':''}>${icon(recording?'stop':'mic',17)}${recording?'Arrêter':s.audio==='permission'?'Autorisation du micro…':s.audio==='stopping'?'Préparation…':'Enregistrer une note vocale'}</button>${recording?`<div class="recording">${wave()}<span id="timer">00:00</span></div>`:''}`}</div>
-      ${s.clip && !s.draft ? '<p>Aucune transcription disponible. Dictez avec le clavier ou ajoutez le texte pour que le chatbot comprenne la note.</p>' : ''}<form id="chat-form"><label for="answer">${s.clip?'Transcription ou précisions':'Votre réponse'}</label><div class="composer"><input id="answer" name="answer" placeholder="${s.clip?'Ajoutez ou corrigez le texte…':'Écrivez votre réponse…'}" required value="${esc(s.draft)}" ${busy?'disabled':''}><button class="primary" ${busy?'disabled':''} aria-label="${s.clip?'Envoyer la note vocale':'Envoyer la réponse'}">${icon('send',19)}</button></div></form>
+      ${s.clip ? `<p role="status">${s.audio === 'transcribing' ? 'Transcription de votre note en cours…' : s.transcribed ? 'Transcription prête. Vérifiez le texte avant de l’envoyer.' : 'Écrivez votre message ou réessayez la transcription.'}</p>` : ''}<form id="chat-form"><label for="answer">${s.clip?'Transcription ou précisions':'Votre réponse'}</label><div class="composer"><input id="answer" name="answer" placeholder="${s.clip?'Ajoutez ou corrigez le texte…':'Écrivez votre réponse…'}" required value="${esc(s.draft)}" ${busy?'disabled':''}><button class="primary" ${busy?'disabled':''} aria-label="${s.clip?'Envoyer la note vocale':'Envoyer la réponse'}">${icon('send',19)}</button></div></form>
       ${s.review && !busy ? '<a class="back" href="#verification">Passer au brouillon →</a>' : ''}</section>`;
   }
   function field(r,key,label,type='text',options) {
