@@ -1,10 +1,27 @@
 'use strict';
 (() => {
   const main=document.querySelector('main');
-  const paths=['accueil','conversation','verification','formulaire','devis'];
+  const paths=['accueil','conversation','verification','formulaire','devis','devis-pdf'];
   let page, capture, toastClock;
-  const fresh=()=>({fields:{},messages:[],sessionId:null,pending:false,error:"",draft:"",audio:'idle',transcribed:false,timer:'00:00',review:false,stage:'draft',prepared:false});
-  let s=fresh();
+  const fresh=(sessionId)=>({fields:{},messages:[],sessionId,pending:false,error:"",draft:"",audio:'idle',transcribed:false,timer:'00:00',review:false,stage:'draft',prepared:false});
+  let s=fresh(QuotePDF.session());
+  let pdf=QuotePDF.conversation(s.sessionId, paintPdf);
+
+  function paintPdf() {
+    const panel = main.querySelector('#pdf-panel');
+    if (!panel) return;
+    const focused = panel.contains(document.activeElement) ? document.activeElement.dataset : {};
+    panel.innerHTML = Views.pdfPanel(pdf.state, page === 'devis-pdf');
+    if (focused.pdf || focused.act) {
+      const buttons = [...panel.querySelectorAll('button:not(:disabled)')];
+      buttons.find(button => focused.pdf ? button.dataset.pdf === focused.pdf && button.dataset.token === focused.token : button.dataset.act === focused.act)?.focus({preventScroll:true});
+    }
+    const generate = main.querySelector('[data-act="pdf"]');
+    if (generate) {
+      generate.disabled = pdf.state.generating;
+      generate.lastChild.textContent = pdf.state.generating ? 'Génération en cours…' : 'Générer le PDF';
+    }
+  }
   function go(path){ location.hash=path; }
   function toast(message){
     const el=document.querySelector('#toast');
@@ -17,19 +34,27 @@
     const path=location.hash.slice(1);
     const next=paths.includes(path)?path:'accueil';
     if(next !== 'conversation') cancelCapture();
+    const previous=page;
     page=next;
-    if(page==='devis'&&!s.prepared || page==='verification'&&!s.review) page='accueil';
+    if(page==='devis'&&!s.prepared) page='devis-pdf';
+    if(page==='verification'&&!s.review) page='accueil';
     if(page==='conversation') main.innerHTML=Views.conversation(s);
     else if(page==='formulaire'||page==='verification') main.innerHTML=Views.form(s.fields,page==='verification');
     else if(page==='devis') main.innerHTML=Views.quote(s.fields,s.review,s.stage);
+    else if(page==='devis-pdf') main.innerHTML=Views.pdfPage();
     else main.innerHTML=Views.home();
+    if (['conversation','devis','devis-pdf'].includes(page)) {
+      main.insertAdjacentHTML('beforeend','<section id="pdf-panel" class="box" aria-label="Devis PDF de la conversation"></section>');
+      if (previous !== page) pdf.refresh();
+      else paintPdf();
+      if (page === 'conversation') main.insertAdjacentHTML('beforeend','<button class="reset" data-act="new-chat">Nouvelle conversation</button>');
+    }
     document.title=main.querySelector('h1').textContent+' · Cognalys Intelligence';
     if(focus){window.scrollTo(0,0);main.focus({preventScroll:true});}
   }
   async function sendMessage(text, clip) {
     const chat = s;
     if (chat.pending) return;
-    chat.sessionId ??= crypto.randomUUID();
     chat.messages.push({user:true, text:clip ? '' : text, audioUrl:clip?.url});
     chat.pending = true;
     chat.error = chat.draft = '';
@@ -51,6 +76,7 @@
       if (typeof reply !== 'string' || !reply.trim()) throw new Error('Réponse vide ou illisible');
       chat.messages.push({user:false,text:reply});
       if (clip) chat.clip = null;
+      if (s === chat) pdf.refresh();
       chat.review = true;
       chat.fields.notes ??= text;
     } catch (error) {
@@ -71,7 +97,6 @@
     const chat = s;
     if (!clip || chat.audio === 'transcribing') return;
     let messageToSend = '';
-    chat.sessionId ??= crypto.randomUUID();
     chat.audio = 'transcribing';
     chat.transcribed = false;
     chat.error = '';
@@ -176,16 +201,24 @@
       render(false);
     }
   }
-  function reset(){
+  function newConversation(){
     cancelCapture();
     const urls = new Set([s.clip?.url, ...s.messages.map(message => message.audioUrl)]);
     urls.forEach(url => { if (url) URL.revokeObjectURL(url); });
-    s=fresh();
+    pdf.dispose();
+    s=fresh(QuotePDF.session(true));
+    pdf=QuotePDF.conversation(s.sessionId, paintPdf);
+    page=null;
+    render();
   }
   window.addEventListener('pagehide',cancelCapture);
   document.addEventListener('click',event=>{
     if(event.target.closest('.skip')){event.preventDefault();main.focus();return;}
-    if(page==='accueil'&&event.target.closest('.voice-option,.form-option')) reset();
+    const pdfButton=event.target.closest('[data-pdf]');
+    if (pdfButton) {
+      pdf.action(pdfButton.dataset.pdf, pdfButton.dataset.token, location.hash);
+      return;
+    }
     const ctl=event.target.closest('[data-act]');
     if(!ctl)return;
     switch(ctl.dataset.act){
@@ -195,8 +228,12 @@
       case 'transcribe': transcribe(s.clip);break;
       case 'validate':s.stage='valid';render();toast('Validation simulée.');break;
       case 'send':s.stage='sent';render();toast('Envoi simulé. Aucun email envoyé.');break;
-      case 'pdf':toast('Export simulé. Aucun fichier PDF créé.');break;
-      case 'reset':reset();go('accueil');break;
+      case 'pdf':pdf.generate(s.fields);break;
+      case 'refresh-pdf':pdf.refresh();break;
+      case 'new-chat':newConversation();break;
+      case 'reset':
+        s.fields={};s.prepared=false;s.stage='draft';pdf.state.notice=pdf.state.error='';
+        go('accueil');break;
     }
   });
   document.addEventListener('input',event=>{
@@ -204,6 +241,13 @@
     if(el.id==='answer') s.draft=el.value;
     if(el.setCustomValidity)el.setCustomValidity('');
     if(el.form?.id==='details'){s.fields[el.name]=el.value;s.prepared=false;s.stage='draft';}
+  });
+  document.addEventListener('change',event=>{
+    if (event.target.id !== 'mode_tva') return;
+    const enabled = event.target.value === 'taux';
+    const rate = document.querySelector('#taux_tva');
+    rate.disabled = !enabled;
+    document.querySelector('#tax-field').hidden = !enabled;
   });
   document.addEventListener('submit',event=>{
     event.preventDefault();
@@ -215,9 +259,12 @@
     }else if(f.id==='details'){
       const fields=Object.fromEntries([...new FormData(f)].map(([k,v])=>[k,v.trim()]));
       if(!fields.name){f.elements.namedItem('name').setCustomValidity('Indiquez le nom du client.');f.reportValidity();return;}
+      for (const key of ['montant_ht','taux_tva']) {
+        if (fields[key]) fields[key] = String(Number(fields[key]));
+      }
       s.fields=fields;s.review=page==='verification';s.prepared=true;s.stage='draft';go('devis');
     }
   });
-  window.addEventListener('hashchange',()=>render());
+  window.addEventListener('hashchange',()=>{ QuotePDF.closePreview(); render(); });
   render(false);
 })();

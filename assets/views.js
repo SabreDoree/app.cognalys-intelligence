@@ -111,21 +111,54 @@ const Views = (() => {
     else control=`<input ${attrs} type="${type}" value="${esc(value)}" ${type==='number'?'min="0.01" step="0.01" inputmode="decimal"':''}>`;
     return `<div class="field ${type==='textarea'?'wide':''}"><label for="f-${key}">${label}${key==='name'?' *':''}</label>${control}</div>`;
   }
+  const taxLabels = {a_preciser:'À préciser', franchise:'Franchise en base', taux:'TVA à un taux précisé'};
+  function pricing(r) {
+    const mode = r.mode_tva || 'a_preciser';
+    return `<fieldset><legend>Tarification</legend><div class="fields">
+      <div><label for="montant_ht">Montant HT par intervention (€)</label><input type="number" inputmode="decimal" min="0" max="1000000" step="0.01" id="montant_ht" name="montant_ht" value="${esc(r.montant_ht)}" placeholder="À chiffrer"></div>
+      <div><label for="mode_tva">Régime de TVA</label><select id="mode_tva" name="mode_tva">${Object.entries(taxLabels).map(([key, label]) => `<option value="${key}" ${key === mode ? 'selected' : ''}>${label}</option>`).join('')}</select></div>
+      <div id="tax-field" ${mode === 'taux' ? '' : 'hidden'}><label for="taux_tva">Taux de TVA (%)</label><input type="number" inputmode="decimal" min="0" max="100" step="0.01" id="taux_tva" name="taux_tva" value="${esc(r.taux_tva)}" required ${mode === 'taux' ? '' : 'disabled'}></div>
+    </div></fieldset>`;
+  }
   function form(r,review) {
     return back(review?'conversation':'accueil',review?'Audio ou chat':'Modes de création')+`<h1>${review?'Vérifier les informations':'Formulaire rapide'}</h1><p class="lead">${review?'Complétez les détails de l’appel avant de préparer le devis.':'Saisissez les détails de l’appel pour préparer le brouillon.'}</p>
       <form id="details" class="box"><fieldset><legend>Client</legend><div class="fields">${field(r,'name','Nom du client')}${field(r,'company','Société')}${field(r,'phone','Téléphone','tel')}${field(r,'email','Email','email')}</div></fieldset>
-      <fieldset><legend>Intervention</legend><div class="fields">${field(r,'service','Type de prestation','text',QuoteData.services)}${field(r,'area','Surface estimée (m²)','number')}${field(r,'frequency','Fréquence','text',QuoteData.frequencies)}${field(r,'desired','Date souhaitée','date')}${field(r,'street','Adresse')}${field(r,'city','Ville')}${field(r,'notes','Détails complémentaires','textarea')}${field(r,'amount','Montant estimé par intervention (€)','number')}</div></fieldset>
+      <fieldset><legend>Intervention</legend><div class="fields">${field(r,'service','Type de prestation','text',QuoteData.services)}${field(r,'area','Surface estimée (m²)','number')}${field(r,'frequency','Fréquence','text',QuoteData.frequencies)}${field(r,'desired','Date souhaitée','date')}${field(r,'street','Adresse')}${field(r,'city','Ville')}${field(r,'notes','Détails complémentaires','textarea')}</div></fieldset>${pricing(r)}
       <div class="actions"><small>* Champ obligatoire</small><button class="primary">${icon('file',17)}Préparer le devis</button></div></form>`;
   }
   function quote(r,review,stage) {
     const entry=(key,value)=>`<div><dt>${key}</dt><dd>${esc(value||'À préciser')}</dd></div>`;
     const date=r.desired ? new Intl.DateTimeFormat('fr-FR',{dateStyle:'long'}).format(new Date(r.desired+'T12:00:00')) : '';
-    const amount=r.amount ? new Intl.NumberFormat('fr-FR',{style:'currency',currency:'EUR'}).format(Number(r.amount)):'À chiffrer';
+    const amount=r.montant_ht ? new Intl.NumberFormat('fr-FR',{style:'currency',currency:'EUR'}).format(Number(r.montant_ht)):'À chiffrer';
     const origin=review?'verification':'formulaire';
     return back(origin,'Informations du devis')+`<h1>${stage==='draft'?'Brouillon de devis':stage==='valid'?'Devis validé':'Envoi simulé'}</h1><p class="lead">Vérifiez le contenu et le montant par intervention.</p>
       <article class="box paper"><div class="paperhead"><strong>Propreté Est</strong><span class="demo">${{draft:'Brouillon',valid:'Validé',sent:'Envoyé · simulation'}[stage]}</span></div><h2>${esc(r.name)}</h2><p>${esc([r.company,r.email,r.phone].filter(Boolean).join(' · '))}</p>
-      <dl>${entry('Prestation',r.service)}${entry('Surface',r.area && r.area+' m²')}${entry('Fréquence',r.frequency)}${entry('Adresse',[r.street,r.city].filter(Boolean).join(', '))}${entry('Date souhaitée',date)}${entry('Notes',r.notes||'Aucune note')}</dl><div class="total"><span>Montant estimé<small>Par intervention</small></span><b>${amount}</b></div></article>
-      <div class="quote-actions"><a class="secondary" href="#${origin}">${icon('pen',16)}Modifier</a><button class="secondary" data-act="pdf">${icon('download',16)}Télécharger en PDF</button>${stage==='draft'?'<button class="primary" data-act="validate">Valider</button>':stage==='valid'?'<button class="primary" data-act="send">Simuler l’envoi</button>':''}</div><button class="reset" data-act="reset">Créer un autre devis</button>`;
+      <dl>${entry('Prestation',r.service)}${entry('Surface',r.area && r.area+' m²')}${entry('Fréquence',r.frequency)}${entry('Adresse',[r.street,r.city].filter(Boolean).join(', '))}${entry('Date souhaitée',date)}${entry('Notes',r.notes||'Aucune note')}${entry('TVA',r.mode_tva === 'taux' ? r.taux_tva + ' %' : taxLabels[r.mode_tva || 'a_preciser'])}</dl><div class="total"><span>Montant HT<small>Par intervention</small></span><b>${amount}</b></div></article>
+      <div class="quote-actions"><a class="secondary" href="#${origin}">${icon('pen',16)}Modifier</a><button class="secondary" data-act="pdf">${icon('download',16)}Générer le PDF</button>${stage==='draft'?'<button class="primary" data-act="validate">Valider</button>':stage==='valid'?'<button class="primary" data-act="send">Simuler l’envoi</button>':''}</div><button class="reset" data-act="reset">Créer un autre devis</button>`;
   }
-  return {home,conversation,form,quote};
+  function pdfPanel(pdf, standalone) {
+    const decision = {autorise:'Autorisée', refuse:'Refusée', en_attente:'En attente'};
+    const button = (row, act, label, disabled) => `<button type="button" class="secondary" data-pdf="${act}" data-token="${esc(row.token)}" ${disabled ? 'disabled' : ''}>${label}</button>`;
+    const cards = pdf.rows.map(row => {
+      const busy = pdf.busy.get(row.token);
+      const date = new Date(row.cree_le || '');
+      const created = Number.isFinite(date.getTime()) ? date.toLocaleString('fr-FR', {dateStyle:'medium',timeStyle:'short'}) : 'Non renseignée';
+      return `<article class="pdf-card"><div class="pdf-heading"><h3>${esc(row.numero)}</h3><span class="demo">${esc(row.statut || 'Statut inconnu')}</span></div>
+        <dl><div><dt>Client</dt><dd>${esc(row.nom_client || 'Non renseigné')}</dd></div>
+        <div><dt>Prestation</dt><dd>${esc(row.prestation || 'Non renseignée')}</dd></div><div><dt>Création</dt><dd>${esc(created)}</dd></div></dl>
+        <div class="pdf-actions">${button(row,'preview',busy === 'preview' ? 'Ouverture…' : 'Prévisualiser',busy)}${button(row,'download',busy === 'download' ? 'Téléchargement…' : 'Télécharger',busy)}</div>
+        <p>Préparation d’un brouillon email · <strong>${esc(decision[row.decision_brouillon_mail] || 'Non renseignée')}</strong></p>
+        <div class="pdf-actions">${button(row,'autorise',busy === 'autorise' ? 'Enregistrement…' : 'Autoriser la préparation d’un brouillon email',busy || row.decision_brouillon_mail === 'autorise')}${button(row,'refuse',busy === 'refuse' ? 'Enregistrement…' : 'Refuser',busy || row.decision_brouillon_mail === 'refuse')}</div>
+        </article>`;
+    }).join('');
+    return `<div class="pdf-heading">${standalone ? '<h2>Cette conversation</h2>' : '<h2>Devis PDF</h2>'}<button class="secondary" data-act="refresh-pdf" ${pdf.loading ? 'disabled' : ''}>Actualiser</button></div>
+      <div role="status">${pdf.loading ? '<p>Chargement des devis…</p>' : ''}${pdf.notice ? `<p>${esc(pdf.notice)}</p>` : ''}</div>
+      ${[pdf.error,pdf.listError].filter(Boolean).map(message => `<p role="alert">${esc(message)}</p>`).join('')}
+      ${cards || (!pdf.loading && !pdf.listError ? '<p>Aucun devis PDF dans cette conversation.</p>' : '')}
+      ${cards ? '<p class="pdf-note">La décision est enregistrée pour une future fonctionnalité. Aucun brouillon email n’est créé et aucun email n’est envoyé.</p>' : ''}`;
+  }
+  function pdfPage() {
+    return back('conversation','Revenir à la conversation') + '<h1>Devis PDF</h1>';
+  }
+  return {home,conversation,form,quote,pdfPage,pdfPanel};
 })();
