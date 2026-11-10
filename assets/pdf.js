@@ -2,20 +2,9 @@
 const QuotePDF = (() => {
   const base = 'https://n8n.cognalys-intelligence.fr/webhook/cognalys/devis/';
   const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-  const sessionKey = 'cognalys.conversation';
   const invalid = () => new Error('Réponse du service PDF invalide.');
   const viewer = document.querySelector('#pdf-viewer');
   let previewUrl, previewOwner;
-
-  function session(renew = false) {
-    try {
-      const saved = sessionStorage.getItem(sessionKey);
-      if (!renew && uuid.test(saved)) return saved;
-    } catch { /* The tab still works in memory when storage is unavailable. */ }
-    const id = crypto.randomUUID();
-    try { sessionStorage.setItem(sessionKey, id); } catch { /* In-memory session. */ }
-    return id;
-  }
 
   async function request(path, data, binary = false) {
     const controller = new AbortController();
@@ -168,5 +157,5 @@ const QuotePDF = (() => {
       previewOwner = null;
     }
   });
-  return {session, conversation, closePreview};
+  return {conversation, closePreview};
 })();

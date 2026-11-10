@@ -4,7 +4,42 @@
   const paths=['accueil','conversation','verification','formulaire','devis','devis-pdf'];
   let page, capture, toastClock;
   const fresh=(sessionId)=>({fields:{},messages:[],sessionId,pending:false,error:"",draft:"",audio:'idle',transcribed:false,timer:'00:00',review:false,stage:'draft',prepared:false});
-  let s=fresh(QuotePDF.session());
+  const sessionKey = 'cognalys.conversation';
+  const sessionUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  let useHistoryFallback = false;
+
+  function syncHistorySession(id) {
+    const state = {...history.state};
+    if (useHistoryFallback) state[sessionKey] = id;
+    else if (sessionKey in state) delete state[sessionKey];
+    else return;
+    try { history.replaceState(state, ''); }
+    catch { /* The current conversation can still continue in memory. */ }
+  }
+
+  function startSession(renew = false) {
+    // An entry carries a fallback only if sessionStorage previously rejected a write.
+    const fallback = history.state?.[sessionKey];
+    let id;
+    if (!renew) {
+      if (sessionUuid.test(fallback)) id = fallback;
+      else {
+        try { id = sessionStorage.getItem(sessionKey); }
+        catch { /* Storage may be disabled for this origin. */ }
+      }
+    }
+    if (!sessionUuid.test(id)) id = crypto.randomUUID();
+    try {
+      sessionStorage.setItem(sessionKey, id);
+      useHistoryFallback = false;
+    } catch {
+      useHistoryFallback = true;
+    }
+    syncHistorySession(id);
+    return id;
+  }
+
+  let s=fresh(startSession());
   let pdf=QuotePDF.conversation(s.sessionId, paintPdf);
 
   function paintPdf() {
@@ -206,7 +241,7 @@
     const urls = new Set([s.clip?.url, ...s.messages.map(message => message.audioUrl)]);
     urls.forEach(url => { if (url) URL.revokeObjectURL(url); });
     pdf.dispose();
-    s=fresh(QuotePDF.session(true));
+    s=fresh(startSession(true));
     pdf=QuotePDF.conversation(s.sessionId, paintPdf);
     page=null;
     render();
@@ -265,6 +300,10 @@
       s.fields=fields;s.review=page==='verification';s.prepared=true;s.stage='draft';go('devis');
     }
   });
-  window.addEventListener('hashchange',()=>{ QuotePDF.closePreview(); render(); });
+  window.addEventListener('hashchange',()=>{
+    syncHistorySession(s.sessionId);
+    QuotePDF.closePreview();
+    render();
+  });
   render(false);
 })();
