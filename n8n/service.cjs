@@ -58,6 +58,7 @@ function service(req, rows, token, now=new Date().toISOString()) {
     if(company&&!next.rcsCity)throw Error('Ville du RCS requise pour une société commerciale.');
     if(!['standard','franchise'].includes(p.vatMode))throw Error('Choisissez le régime de TVA.');next.vatMode=p.vatMode;
     if(next.vatMode==='standard'&&(!/^FR[A-Z0-9]{2}\d{9}$/.test(next.vatNumber)||!next.vatNumber.endsWith(next.siren)))throw Error('Numéro de TVA français requis et cohérent avec le SIREN.');
+    if(next.vatMode==='standard'&&/^FR[0-9]{2}/.test(next.vatNumber)&&Number(next.vatNumber.slice(2,4))!==((12+3*(Number(next.siren)%97))%97))throw Error('Clé de contrôle du numéro de TVA incohérente.');
     if(next.companyEmail&&!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(next.companyEmail))throw Error('E-mail de l’entreprise invalide.');
     next.validityDays=num(p.validityDays,1,365,0);next.depositPercent=num(p.depositPercent??0,0,100);
     if(!next.paymentTerms||!next.executionTerms)throw Error('Modalités de paiement et date ou délai d’exécution requis.');

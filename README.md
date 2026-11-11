@@ -17,7 +17,7 @@ La connexion utilise Firebase Authentication, projet `cognalys-intelligence-devi
 
 Chaque point d’entrée (API, chat, PDF et audio) appelle `COGNALYS V2 - Accès Firebase`. Google vérifie le jeton via accounts:lookup ; le workflow contrôle aussi le projet, le sujet, les dates, la désactivation et la révocation, puis recherche l’UID dans la table d’appartenance. L’espace métier vient uniquement de cette table côté serveur. Une clé privée de démonstration, un scope ou un UID transmis par le navigateur ne donnent aucun accès.
 
-Table `cognalys_memberships` (`rGN4lPFNidKYXSDq`) : `uid`, `email`, `scope` (64 caractères hexadécimaux), `company`, `active`. Pour activer un compte, vérifier son UID dans Firebase, choisir un scope aléatoire inédit pour une nouvelle entreprise puis insérer une unique ligne active. Pour plusieurs membres de la même entreprise, réutiliser son scope. Pour suspendre, mettre active à false : le prochain appel est refusé. Des lignes multiples pour le même UID sont refusées. L’activation reste administrative dans n8n, sans interface publique d’administration et sans facturation automatique.
+Table `cognalys_memberships` (`rGN4lPFNidKYXSDq`) : `uid`, `email`, `scope` (64 caractères hexadécimaux), `company`, `active`. Pour activer un compte, vérifier son UID dans Firebase, choisir un scope aléatoire inédit pour une nouvelle entreprise puis insérer une unique ligne active. Pour plusieurs membres de la même entreprise, réutiliser son scope. Pour suspendre, mettre active à false : le prochain appel est refusé. Des lignes multiples pour le même UID sont refusées. L’interface Administration est réservée au seul UID propriétaire TJFfqZBnzyfgpZRNmKGDwWnUltP2, vérifié côté serveur. Elle permet l’approbation, le refus, la suspension manuelle pour impayé et la réactivation. Aucune facturation automatique.
 
 Les anciens espaces et PDF sont conservés. Leur clé locale n’est plus acceptée pour se connecter. Un administrateur peut associer leur empreinte SHA-256 au compte du propriétaire après vérification de possession, sans déplacer ni réécrire les devis. Aucun rattachement automatique au premier compte inscrit.
 
@@ -74,4 +74,17 @@ Seul `SabreDoree/app.cognalys-intelligence` est concerné. GitHub Pages sert `ht
 ## Tests audio
 
 `node --test tests/audio.test.cjs` vérifie capture et arrêt des pistes, formats WebM/M4A, appel du webhook V2, transmission au chat, refus des sessions incohérentes, erreur serveur, relance sans duplication du texte et réponse tardive après changement de conversation. Ces tests simulent les API matérielles ; les tests HTTP utilisent des fichiers audio réels. Aucun quota OpenRouter ou mécanisme d’abonnement n’a été ajouté dans cette modification.
+
+
+## Administration et mentions du devis
+
+Le workflow d’accès conserve les inscriptions authentifiées en attente dans `cognalys_memberships`, colonne `status` : pending, approved, suspended, rejected ; archived est réservé au rangement des essais. Les comptes existants créés directement dans Firebase apparaissent après leur première connexion à l’application. Aucune clé d’administration Firebase n’est requise et les mots de passe ne passent pas par n8n.
+
+Les commandes `admin.list`, `admin.approve`, `admin.reject`, `admin.suspend`, `admin.reactivate` passent par l’API métier. Elles exigent l’UID propriétaire authentifié, une appartenance active et un appel depuis le webhook de l’application. Les appels d’outil du modèle sont exclus. Le propriétaire ne peut pas se désactiver lui-même dans ce panneau. Une suspension préserve l’espace et bloque les appels suivants ; une opération déjà en cours peut se terminer.
+
+La section Dossiers affiche toutes les versions des devis dans l’ordre de génération croissant, avec accès aux PDF. Les paramètres contiennent une adresse française structurée, forme juridique, SIREN/SIRET, RCS, capital, régime et numéro de TVA, contacts, validité, paiement, délai d’exécution, acompte, assurance/SAP/médiation si applicables. L’IGN vérifie la correspondance entre code postal et commune avant enregistrement ; cela ne certifie pas l’existence de la voie, l’identité de l’entreprise ou son occupation de l’adresse. Une indisponibilité du référentiel empêche une validation fictive et demande de réessayer.
+
+Les devis restent des brouillons, à établissement gratuit. Les informations absentes sont signalées ; ce modèle de démonstration ne certifie pas la conformité de tous les secteurs réglementés, contrats SAP, interventions urgentes, ventes à distance ou opérations internationales. Les adresses d’émetteur prises en charge sont françaises. Les cas CEDEX et libellés non reconnus nécessitent adaptation. La franchise de TVA applique zéro TVA et la mention d’exonération ; un changement de régime impose un nouveau devis pour éviter un mélange des régimes. Les anciens PDF et instantanés sont conservés.
+
+Sources officielles consultées le 11 novembre 2026 : [devis](https://www.economie.gouv.fr/dgccrf/les-fiches-pratiques/devis), [mentions commerciales](https://www.legifrance.gouv.fr/codes/id/LEGISCTA000006178891/), [franchise de TVA](https://www.impots.gouv.fr/professionnel/questions/je-suis-micro-entrepreneur-ou-la-tete-dune-micro-entreprise-ai-je-des), [communes par code postal](https://apicarto.ign.fr/api/doc/codes-postaux).
 

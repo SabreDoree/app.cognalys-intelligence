@@ -1,0 +1,3 @@
+const {test}=require('node:test'),assert=require('node:assert/strict'),{communeValidation}=require('../n8n/commune-validation.cjs');
+test('Paris accepte son libellé postal et Strasbourg est refusé avec 75001',()=>{const r={statusCode:200,body:[{codePostal:'75001',nomCommune:'Paris 1er Arrondissement',libelleAcheminement:'PARIS'}]};assert.equal(communeValidation(r,{postalCode:'75001',city:'Paris'}).valid,true);assert.equal(communeValidation(r,{postalCode:'75001',city:'Strasbourg'}).valid,false);});
+test('l’échec du référentiel ne provoque jamais une validation fictive',()=>{assert.equal(communeValidation({statusCode:503,body:[]},{postalCode:'68000',city:'Colmar'}).valid,false);});

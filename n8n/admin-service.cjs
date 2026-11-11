@@ -4,7 +4,7 @@ function adminService(actor,req,rows,newScope){
  if(actor.uid!==OWNER||!actor.authorized||!req.web)return fail('Administration réservée au propriétaire.');
  const members=rows.filter(r=>r.uid);
  const clean=r=>({uid:r.uid,email:r.email||'',company:r.company||'',active:r.active===true,status:r.status||(r.active?'approved':r.scope?'suspended':'pending'),updatedAt:r.updatedAt,createdAt:r.createdAt});
- if(req.command==='admin.list')return {write:false,result:{ok:true,members:members.map(clean).sort((a,b)=>String(a.createdAt).localeCompare(String(b.createdAt)))}};
+ if(req.command==='admin.list')return {write:false,result:{ok:true,members:members.filter(r=>r.status!=='archived').map(clean).sort((a,b)=>String(a.createdAt).localeCompare(String(b.createdAt)))}};
  const p=req.params||{};
  if(p.uid===OWNER)return fail('Le compte propriétaire ne peut pas être désactivé ici.');
  const found=members.filter(r=>r.uid===p.uid);if(found.length!==1)return fail('Compte absent ou en doublon. Actualisez la liste.');
