@@ -1,0 +1,305 @@
+{
+  "id": "HpwGF5OGfm4j6oCJ",
+  "name": "COGNALYS V2 - Consultation PDF privée",
+  "nodes": [
+    {
+      "id": "b61d18ca-bc20-4351-953f-359d07066bbd",
+      "name": "PDF privé",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "cognalys/v2/pdf",
+        "responseMode": "responseNode",
+        "options": {
+          "allowedOrigins": "https://app.cognalys-intelligence.fr,https://sabredoree.github.io",
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Cache-Control",
+                "value": "no-store"
+              }
+            ]
+          }
+        }
+      },
+      "webhookId": "22c9063e-b34c-47f4-8f16-b946243f6292"
+    },
+    {
+      "id": "eb1e2822-a2bd-4b70-b4c2-7cec34448b62",
+      "name": "Valider accès",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        224,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "'use strict';\nconst UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;\nfunction normalize(raw) {\n  const p=raw.body ?? raw;\n  if(!/^[0-9a-f]{64}$/.test(p.workspaceKey||'')) throw Error('Clé privée de démonstration absente ou invalide.');\n  if(!UUID.test(p.sessionId||'')) throw Error('sessionId doit être un UUID de conversation, jamais un dossierId.');\n  let params=p.params??{};\n  if(typeof params==='string') {try{params=JSON.parse(params);}catch{throw Error('Paramètres JSON invalides.');}}\n  if(!params||Array.isArray(params)||typeof params!=='object') throw Error('Paramètres invalides.');\n  if(JSON.stringify(params).length>40000) throw Error('Demande trop volumineuse.');\n  return {workspaceKey:p.workspaceKey,sessionId:p.sessionId,command:String(p.command||''),params,requestId:String(p.requestId||'')};\n}\n\nconst p=normalize($input.first().json);if(!UUID.test(p.params.token||''))throw Error('Jeton PDF invalide.');return [{json:p}];"
+      }
+    },
+    {
+      "id": "1f649cc7-163e-45f0-aaad-859a9eaa118b",
+      "name": "Espace PDF",
+      "type": "n8n-nodes-base.crypto",
+      "typeVersion": 1,
+      "position": [
+        448,
+        0
+      ],
+      "parameters": {
+        "action": "hash",
+        "type": "SHA256",
+        "value": "={{ $json.workspaceKey }}",
+        "dataPropertyName": "scope",
+        "encoding": "hex"
+      }
+    },
+    {
+      "id": "77701f6e-4157-4219-851c-86027739b9b3",
+      "name": "Chercher version privée",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        672,
+        0
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "8aCc7MSHqBrdBtGH"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "scope",
+              "condition": "eq",
+              "keyValue": "={{ $('Espace PDF').first().json.scope }}"
+            },
+            {
+              "keyName": "kind",
+              "condition": "eq",
+              "keyValue": "quote"
+            }
+          ]
+        },
+        "returnAll": true
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "aba04fd0-4c51-4c21-9e41-59612d474853",
+      "name": "Vérifier version et espace",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        896,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const p=$('Espace PDF').first().json;const qs=$input.all().map(i=>i.json).filter(r=>r.scope===p.scope&&r.kind==='quote').map(r=>JSON.parse(r.payload));const q=qs.find(q=>q.token===p.params.token);return [{json:q?{allowed:true,token:q.token,numero:q.numero}:{allowed:false,error:'PDF introuvable dans cet espace.'}}];"
+      }
+    },
+    {
+      "id": "90cba666-74b5-45d8-a55b-0da856906fd3",
+      "name": "Lire PDF privé",
+      "type": "n8n-nodes-base.readWriteFile",
+      "typeVersion": 1.1,
+      "position": [
+        1120,
+        0
+      ],
+      "parameters": {
+        "operation": "read",
+        "fileSelector": "={{ '/files/devis/'+$json.token+'.pdf' }}",
+        "options": {
+          "dataPropertyName": "pdf"
+        }
+      }
+    },
+    {
+      "id": "9a9f74ec-6134-40cb-a0c5-9357d820d282",
+      "name": "Servir vrai PDF",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1344,
+        0
+      ],
+      "parameters": {
+        "respondWith": "binary",
+        "responseDataSource": "set",
+        "inputFieldName": "pdf",
+        "options": {
+          "responseCode": 200,
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "application/pdf"
+              },
+              {
+                "name": "Cache-Control",
+                "value": "no-store"
+              },
+              {
+                "name": "Content-Disposition",
+                "value": "={{ 'inline; filename=\"'+$('Vérifier version et espace').first().json.numero+'.pdf\"' }}"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "84079c10-5636-44f5-a2da-060cf3d78c67",
+      "name": "Version autorisée ?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1000,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.allowed }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      }
+    },
+    {
+      "id": "b22f6ac7-d02d-46a7-b28f-1fc9d181d38a",
+      "name": "Refuser PDF",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1250,
+        200
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ {ok:false,error:$json.error} }}",
+        "options": {
+          "responseCode": 404
+        }
+      }
+    }
+  ],
+  "connections": {
+    "PDF privé": {
+      "main": [
+        [
+          {
+            "node": "Valider accès",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Valider accès": {
+      "main": [
+        [
+          {
+            "node": "Espace PDF",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Espace PDF": {
+      "main": [
+        [
+          {
+            "node": "Chercher version privée",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Chercher version privée": {
+      "main": [
+        [
+          {
+            "node": "Vérifier version et espace",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Lire PDF privé": {
+      "main": [
+        [
+          {
+            "node": "Servir vrai PDF",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Vérifier version et espace": {
+      "main": [
+        [
+          {
+            "node": "Version autorisée ?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Version autorisée ?": {
+      "main": [
+        [
+          {
+            "node": "Lire PDF privé",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Refuser PDF",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "availableInMCP": true,
+    "saveManualExecutions": false,
+    "saveDataErrorExecution": "none",
+    "saveDataSuccessExecution": "none"
+  },
+  "activeVersionId": "209710a2-3273-4eb7-b66b-de763511ae32"
+}

@@ -1,9 +1,7 @@
 'use strict';
-(() => {
-  const main=document.querySelector('main');
-  const paths=['accueil','conversation','verification','formulaire','devis','devis-pdf'];
-  let page, capture, toastClock;
-  const fresh=(sessionId)=>({fields:{},messages:[],sessionId,pending:false,error:"",draft:"",audio:'idle',transcribed:false,timer:'00:00',review:false,stage:'draft',prepared:false});
+(()=>{
+ const main=document.querySelector('main');let page,capture,toastClock;
+ const fresh=sessionId=>({sessionId,fields:{},messages:[],draft:'',pending:false,error:'',audio:'idle',transcribed:false,dossiers:[],catalog:[],quotes:[],dossierDraft:{},catalogDraft:{},quoteDraft:{lines:[{catalogId:'',quantity:''}]},busy:false,loading:false,notice:'',history:false});
   const sessionKey = 'cognalys.conversation';
   const sessionUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
   let useHistoryFallback = false;
@@ -39,95 +37,32 @@
     return id;
   }
 
-  let s=fresh(startSession());
-  let pdf=QuotePDF.conversation(s.sessionId, paintPdf);
 
-  function paintPdf() {
-    const panel = main.querySelector('#pdf-panel');
-    if (!panel) return;
-    const focused = panel.contains(document.activeElement) ? document.activeElement.dataset : {};
-    panel.innerHTML = Views.pdfPanel(pdf.state, page === 'devis-pdf');
-    if (focused.pdf || focused.act) {
-      const buttons = [...panel.querySelectorAll('button:not(:disabled)')];
-      buttons.find(button => focused.pdf ? button.dataset.pdf === focused.pdf && button.dataset.token === focused.token : button.dataset.act === focused.act)?.focus({preventScroll:true});
-    }
-    const generate = main.querySelector('[data-act="pdf"]');
-    if (generate) {
-      generate.disabled = pdf.state.generating;
-      generate.lastChild.textContent = pdf.state.generating ? 'Génération en cours…' : 'Générer le PDF';
-    }
-  }
-  function go(path){ location.hash=path; }
-  function toast(message){
-    const el=document.querySelector('#toast');
-    clearTimeout(toastClock);
-    el.textContent=message;
-    el.classList.add('visible');
-    toastClock=setTimeout(()=>el.classList.remove('visible'),3300);
-  }
-  function render(focus=true){
-    const path=location.hash.slice(1);
-    const next=paths.includes(path)?path:'accueil';
-    if(next !== 'conversation') cancelCapture();
-    const previous=page;
-    page=next;
-    if(page==='devis'&&!s.prepared) page='devis-pdf';
-    if(page==='verification'&&!s.review) page='accueil';
-    if(page==='conversation') main.innerHTML=Views.conversation(s);
-    else if(page==='formulaire'||page==='verification') main.innerHTML=Views.form(s.fields,page==='verification');
-    else if(page==='devis') main.innerHTML=Views.quote(s.fields,s.review,s.stage);
-    else if(page==='devis-pdf') main.innerHTML=Views.pdfPage();
-    else main.innerHTML=Views.home();
-    if (['conversation','devis','devis-pdf'].includes(page)) {
-      main.insertAdjacentHTML('beforeend','<section id="pdf-panel" class="box" aria-label="Devis PDF de la conversation"></section>');
-      if (previous !== page) pdf.refresh();
-      else paintPdf();
-      if (page === 'conversation') main.insertAdjacentHTML('beforeend','<button class="reset" data-act="new-chat">Nouvelle conversation</button>');
-    }
-    document.title=main.querySelector('h1').textContent+' · Cognalys Intelligence';
-    if(focus){window.scrollTo(0,0);main.focus({preventScroll:true});}
-  }
-  async function sendMessage(text, clip) {
-    const chat = s;
-    if (chat.pending) return;
-    chat.messages.push({user:true, text:clip ? '' : text, audioUrl:clip?.url});
-    chat.pending = true;
-    chat.error = chat.draft = '';
-    render(false);
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 90000);
-    try {
-      const body = JSON.stringify({action:'sendMessage', sessionId:chat.sessionId, chatInput:text});
-      const response = await fetch('https://n8n.cognalys-intelligence.fr/webhook/759b9f24-ac69-4c11-9b44-f3032ea8a444/chat', {
-        method: 'POST',
-        headers: {'Content-Type':'application/json'},
-        body,
-        signal: controller.signal
-      });
-      if (!response.ok) throw new Error('HTTP ' + response.status);
-      const data = await response.json();
-      const item = Array.isArray(data) ? data[0] : data;
-      const reply = item?.output ?? item?.text ?? (typeof item === 'string' ? item : null);
-      if (typeof reply !== 'string' || !reply.trim()) throw new Error('Réponse vide ou illisible');
-      chat.messages.push({user:false,text:reply});
-      if (clip) chat.clip = null;
-      if (s === chat) pdf.refresh();
-      chat.review = true;
-      chat.fields.notes ??= text;
-    } catch (error) {
-      chat.messages.pop();
-      chat.draft = text;
-      chat.error = 'Réponse indisponible. Vérifiez la connexion et réessayez. ' +
-        (error.message.startsWith('HTTP ') ? error.message : '');
-    } finally {
-      clearTimeout(timeout);
-      chat.pending = false;
-      if (s === chat && page === 'conversation') {
-        render(false);
-        main.querySelector('#answer')?.focus();
-      }
-    }
-  }
+ let s=fresh(startSession());
+ function go(hash){location.hash=hash;}
+ function toast(text){const el=document.querySelector('#toast');el.textContent=text;el.classList.add('visible');clearTimeout(toastClock);toastClock=setTimeout(()=>el.classList.remove('visible'),4000);}
+ function render(focus=false){
+  const hash=location.hash.slice(1)||'accueil';page=hash==='verification'?'formulaire':hash;
+  if(page!=='conversation')cancelCapture();
+  const views={accueil:Views.home,conversation:Views.conversation,formulaire:Views.dossiers,dossiers:Views.dossiers,parametres:Views.settings,devis:Views.composer,'devis-pdf':x=>'<h1>Devis PDF</h1>'+Views.status(x)+'<section class="box">'+Views.pdfPanel(x)+'</section>',espace:Views.workspace};
+  main.innerHTML=(views[page]||Views.home)(s);
+  if(page==='conversation')main.insertAdjacentHTML('beforeend','<button class="reset" data-act="new-chat" '+(s.pending?'disabled':'')+'>Nouvelle conversation</button><section class="box">'+Views.pdfPanel(s)+'</section>');
+  if(!QuoteAPI.storageAvailable)main.insertAdjacentHTML('afterbegin','<p role="alert">Le navigateur refuse le stockage. Sauvegardez la clé dans Espace privé avant de fermer la page.</p>');
+  document.title=(main.querySelector('h1')?.textContent||'Cognalys')+' · Cognalys Intelligence';if(focus){window.scrollTo(0,0);main.focus({preventScroll:true});}
+ }
+ async function reload(){
+  const chat=s;chat.loading=true;render();
+  try{const [d,c,q]=await Promise.all([QuoteAPI.call(chat.sessionId,'dossier.list'),QuoteAPI.call(chat.sessionId,'catalog.list'),QuoteAPI.call(chat.sessionId,'quote.list',{history:true})]);if(s!==chat)return;chat.dossiers=d.dossiers;chat.catalog=c.items;chat.quotes=q.quotes;}
+  catch(e){if(s===chat)chat.error='Lecture du serveur impossible : '+e.message;}
+  finally{if(s===chat){chat.loading=false;render();}}
+ }
+ async function operation(job){if(s.busy||s.pending)return;const state=s;state.busy=true;state.error=state.notice='';render();try{await job();}catch(e){state.error=e.message;}finally{state.busy=false;if(s===state)render();}}
+ async function sendMessage(text,clip){
+  const chat=s;if(chat.pending||chat.busy)return;chat.messages.push({user:true,text:clip?'':text,audioUrl:clip?.url});chat.pending=true;chat.error=chat.draft='';render();
+  try{const data=await QuoteAPI.request('chat',{sessionId:chat.sessionId,chatInput:text});if(typeof data.output!=='string'||!data.output.trim())throw Error('Réponse vide.');chat.messages.push({text:data.output});if(clip)chat.clip=null;if(s===chat){await reload();if(data.document?.token){const exact=chat.quotes.find(q=>q.token===data.document.token);if(exact)await QuotePDF.action(chat.sessionId,exact,/\btélécharge/i.test(text)?'download':'preview');}}}
+  catch(e){chat.error='Action non confirmée : '+e.message+' Actualisez les données avant de réessayer.';chat.draft=text;}
+  finally{chat.pending=false;if(s===chat){render();main.querySelector('#answer')?.focus();}}
+ }
   async function transcribe(clip) {
     const chat = s;
     if (!clip || chat.audio === 'transcribing') return;
@@ -236,74 +171,44 @@
       render(false);
     }
   }
-  function newConversation(){
-    cancelCapture();
-    const urls = new Set([s.clip?.url, ...s.messages.map(message => message.audioUrl)]);
-    urls.forEach(url => { if (url) URL.revokeObjectURL(url); });
-    pdf.dispose();
-    s=fresh(startSession(true));
-    pdf=QuotePDF.conversation(s.sessionId, paintPdf);
-    page=null;
-    render();
+
+ function newConversation(){cancelCapture();for(const url of new Set([s.clip?.url,...s.messages.map(m=>m.audioUrl)]))if(url)URL.revokeObjectURL(url);QuotePDF.closePreview();s=fresh(startSession(true));render();reload();}
+ window.addEventListener('pagehide',cancelCapture);
+ function captureFields(){const f=main.querySelector('#dossier-form');if(f)Object.assign(s.dossierDraft,Object.fromEntries(new FormData(f)));const c=main.querySelector('#catalog-form');if(c){Object.assign(s.catalogDraft,Object.fromEntries(new FormData(c)));s.catalogDraft.active=c.elements.active.checked;}const q=main.querySelector('#quote-form');if(q){if(q.elements.dossierId)s.quoteDraft.dossierId=q.elements.dossierId.value;s.quoteDraft.reason=q.elements.reason.value;for(const [i,l] of s.quoteDraft.lines.entries()){if(!l.lineId)l.catalogId=q.elements['catalog-'+i].value;l.quantity=q.elements['quantity-'+i].value;}}}
+ document.addEventListener('input',e=>{if(e.target.id==='answer')s.draft=e.target.value;else captureFields();});
+ document.addEventListener('change',e=>{if(e.target.id==='history-toggle'){s.history=e.target.checked;render();}else captureFields();});
+ document.addEventListener('click',e=>{
+  if(e.target.closest('.skip')){e.preventDefault();main.focus();return;}
+  const el=e.target.closest('button');if(!el||s.busy)return;
+  if(el.dataset.pdf){const q=s.quotes.find(q=>q.token===el.dataset.token);if(q)operation(()=>QuotePDF.action(s.sessionId,q,el.dataset.pdf));return;}
+  if(el.dataset.editDossier){s.dossierDraft={...s.dossiers.find(d=>d.dossierId===el.dataset.editDossier)};render();return;}
+  if(el.dataset.editCatalog){s.catalogDraft={...s.catalog.find(c=>c.id===el.dataset.editCatalog)};render();return;}
+  if(el.dataset.deleteCatalog){const c=s.catalog.find(c=>c.id===el.dataset.deleteCatalog);operation(async()=>{await QuoteAPI.call(s.sessionId,'catalog.delete',{id:c.id,revision:c.revision});s.notice='Suppression confirmée par le serveur.';if(s.catalogDraft.id===c.id)s.catalogDraft={};await reload();});return;}
+  if(el.dataset.compose){s.quoteDraft={dossierId:el.dataset.compose,lines:[{catalogId:'',quantity:''}]};go('devis');return;}
+  if(el.dataset.revise){const q=s.quotes.find(q=>q.token===el.dataset.revise);s.quoteDraft={token:q.token,lines:q.lines.map(l=>({...l})),reason:''};go('devis');return;}
+  if(el.dataset.removeLine!==undefined){captureFields();s.quoteDraft.lines.splice(Number(el.dataset.removeLine),1);render();return;}
+  switch(el.dataset.act){
+   case 'reload':s.error='';reload();break;
+   case 'new-dossier':s.dossierDraft={};render();break;
+   case 'new-catalog':s.catalogDraft={};render();break;
+   case 'add-line':captureFields();s.quoteDraft.lines.push({catalogId:'',quantity:''});render();break;
+   case 'show-key':{const area=main.querySelector('#workspace-key');area.replaceChildren();const key=document.createElement('textarea');key.readOnly=true;key.value=QuoteAPI.getKey();key.setAttribute('aria-label','Clé privée de récupération');area.append(key);key.select();break;}
+   case 'new-chat':if(!s.pending)newConversation();break;
+   case 'record':record();break;case 'stop':stopRecording();break;
+   case 'transcribe':transcribe(s.clip);break;
+   case 'discard':URL.revokeObjectURL(s.clip.url);s.clip=null;s.transcribed=false;s.error='';render();break;
   }
-  window.addEventListener('pagehide',cancelCapture);
-  document.addEventListener('click',event=>{
-    if(event.target.closest('.skip')){event.preventDefault();main.focus();return;}
-    const pdfButton=event.target.closest('[data-pdf]');
-    if (pdfButton) {
-      pdf.action(pdfButton.dataset.pdf, pdfButton.dataset.token, location.hash);
-      return;
-    }
-    const ctl=event.target.closest('[data-act]');
-    if(!ctl)return;
-    switch(ctl.dataset.act){
-      case 'record': record(); break;
-      case 'stop': stopRecording(); break;
-      case 'discard': URL.revokeObjectURL(s.clip.url);s.clip=null;s.transcribed=false;s.error='';render(false);break;
-      case 'transcribe': transcribe(s.clip);break;
-      case 'validate':s.stage='valid';render();toast('Validation simulée.');break;
-      case 'send':s.stage='sent';render();toast('Envoi simulé. Aucun email envoyé.');break;
-      case 'pdf':pdf.generate(s.fields);break;
-      case 'refresh-pdf':pdf.refresh();break;
-      case 'new-chat':newConversation();break;
-      case 'reset':
-        s.fields={};s.prepared=false;s.stage='draft';pdf.state.notice=pdf.state.error='';
-        go('accueil');break;
-    }
-  });
-  document.addEventListener('input',event=>{
-    const el=event.target;
-    if(el.id==='answer') s.draft=el.value;
-    if(el.setCustomValidity)el.setCustomValidity('');
-    if(el.form?.id==='details'){s.fields[el.name]=el.value;s.prepared=false;s.stage='draft';}
-  });
-  document.addEventListener('change',event=>{
-    if (event.target.id !== 'mode_tva') return;
-    const enabled = event.target.value === 'taux';
-    const rate = document.querySelector('#taux_tva');
-    rate.disabled = !enabled;
-    document.querySelector('#tax-field').hidden = !enabled;
-  });
-  document.addEventListener('submit',event=>{
-    event.preventDefault();
-    const f=event.target;
-    if(f.id==='chat-form'){
-      const text=f.elements.answer.value.trim();
-      if(!text){f.elements.answer.setCustomValidity('Écrivez une réponse.');f.elements.answer.reportValidity();return;}
-      sendMessage(text,s.clip);
-    }else if(f.id==='details'){
-      const fields=Object.fromEntries([...new FormData(f)].map(([k,v])=>[k,v.trim()]));
-      if(!fields.name){f.elements.namedItem('name').setCustomValidity('Indiquez le nom du client.');f.reportValidity();return;}
-      for (const key of ['montant_ht','taux_tva']) {
-        if (fields[key]) fields[key] = String(Number(fields[key]));
-      }
-      s.fields=fields;s.review=page==='verification';s.prepared=true;s.stage='draft';go('devis');
-    }
-  });
-  window.addEventListener('hashchange',()=>{
-    syncHistorySession(s.sessionId);
-    QuotePDF.closePreview();
-    render();
-  });
-  render(false);
+ });
+ document.addEventListener('submit',e=>{
+  e.preventDefault();const f=e.target;if(s.busy||s.pending)return;
+  if(f.id==='chat-form'){const text=f.elements.answer.value.trim();if(text)sendMessage(text,s.clip);return;}
+  if(f.id==='workspace-form'){try{QuoteAPI.importKey(f.elements.workspaceKey.value.trim());}catch(e){s.error=e.message;render();}return;}
+  captureFields();
+  if(f.id==='dossier-form')operation(async()=>{const d=s.dossierDraft;const fields=Object.fromEntries(['nom_client','prenom_client','prestation','surface','adresse_chantier','adresse_facturation','frequence','notes'].map(k=>[k,d[k]||'']));const result=await QuoteAPI.call(s.sessionId,'dossier.save',{dossierId:d.dossierId,revision:d.revision,fields});s.dossierDraft=result.dossier;s.notice='Dossier enregistré par le serveur.';await reload();});
+  if(f.id==='catalog-form')operation(async()=>{const c=s.catalogDraft;const result=await QuoteAPI.call(s.sessionId,'catalog.save',{...c,price:Number(c.price),vat:Number(c.vat)});s.catalogDraft=result.item;s.notice='Désignation enregistrée par le serveur.';await reload();});
+  if(f.id==='quote-form')operation(async()=>{const d=s.quoteDraft,old=s.quotes.find(q=>q.token===d.token);const params=old?{token:old.token,quantities:d.lines.filter(l=>l.lineId).map(l=>({lineId:l.lineId,quantity:Number(l.quantity)})),removeLineIds:old.lines.filter(l=>!d.lines.some(x=>x.lineId===l.lineId)).map(l=>l.lineId),addLines:d.lines.filter(l=>!l.lineId).map(l=>({catalogId:l.catalogId,quantity:Number(l.quantity)})),reason:d.reason||'Correction demandée'}:{dossierId:d.dossierId,lines:d.lines.map(l=>({catalogId:l.catalogId,quantity:Number(l.quantity)})),reason:d.reason||'Création'};
+   const result=await QuoteAPI.call(s.sessionId,old?'quote.revise':'quote.create',params);s.notice='PDF confirmé : '+result.quote.numero;s.quoteDraft={lines:[{catalogId:'',quantity:''}]};await reload();go('devis-pdf');await QuotePDF.action(s.sessionId,result.quote,'preview');});
+ });
+ window.addEventListener('hashchange',()=>{syncHistorySession(s.sessionId);s.notice='';QuotePDF.closePreview();render(true);});
+ render();reload();
 })();
