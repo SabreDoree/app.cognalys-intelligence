@@ -40,25 +40,32 @@ Commandes : `catalog.list/save/delete`, `dossier.list/search/save`, `quote.list/
 
 Table `cognalys_demo_v2_events` (`8aCc7MSHqBrdBtGH`) : `scope`, `kind`, `entity`, `requestId`, `payload`. Les événements sont ajoutés sans modifier les instantanés précédents. Les dossiers et désignations sont reconstruits à partir de leur dernière révision. Les devis conservent client, lignes, libellés, unité, quantité, prix, TVA, totaux, parent et version. La version courante est une feuille de la chaîne ; plusieurs feuilles sont affichées en conflit et ne peuvent pas être révisées silencieusement.
 
-Les anciennes tables `devis_demo` et `devis_pdf_demo` sont préservées. Elles ne sont pas automatiquement importées dans les espaces V2, faute d’une attribution fiable à un propriétaire. Les anciennes routes restent un parcours historique distinct ; l’application V2 ne les utilise plus, sauf la transcription audio existante.
+Les anciennes tables `devis_demo` et `devis_pdf_demo` sont préservées. Elles ne sont pas automatiquement importées dans les espaces V2, faute d’une attribution fiable à un propriétaire. Les anciennes routes sont désactivées après séparation de la transcription. L’application ne dépend plus des workflows V1. Les anciennes données et les définitions des workflows sont conservées ; les anciens liens PDF V1 ne sont plus servis tant que leur workflow reste hors ligne.
 
 Workflows publiés dans le projet personnel n8n existant :
 
 - `DkVsfDUoyZIjCDyh` — COGNALYS V2 - API métier privée ;
 - `fG204l6OTpk0Lste` — COGNALYS V2 - Assistant devis privé ;
 - `HpwGF5OGfm4j6oCJ` — COGNALYS V2 - Consultation PDF privée ;
-- `zSQOaORIVS7k7ZiA` — principal historique : mémoire ramenée à 5, origines chat/audio mises à jour ; la transcription reste utilisée.
+- `uytilDGsbu5B8aYS` — COGNALYS V2 - Transcription audio : microphone indépendant de la V1, même OpenRouter Whisper.
 
-Les exports dans `n8n/` décrivent la configuration déployée. `service.cjs` contient les règles testables ; `render.cjs` le modèle PDF. L’instance conserve son moteur Gotenberg et le répertoire `/files/devis/`. Le modèle OpenRouter reste `openai/gpt-oss-20b`, avec température 0,1 et maximum 3 000 tokens de sortie. Les données métier utiles et les cinq interactions sont envoyées au modèle ; ce plafond ne constitue pas un budget mensuel garanti.
+Les sept workflows V1 sont hors ligne : principal, enregistrement, recherche, génération PDF, liste PDF, consultation PDF et décision email. Ils sont conservés pour permettre une réactivation manuelle.
+
+Les exports dans `n8n/` décrivent la configuration déployée. Le workflow audio reprend le parcours V1 : fichier binaire, Base64, OpenRouter `openai/whisper-1`, texte confirmé. Aucun credential OpenRouter n’est exposé au navigateur. `service.cjs` contient les règles testables ; `render.cjs` le modèle PDF. L’instance conserve son moteur Gotenberg et le répertoire `/files/devis/`. Le modèle OpenRouter reste `openai/gpt-oss-20b`, avec température 0,1 et maximum 3 000 tokens de sortie. Les données métier utiles et les cinq interactions sont envoyées au modèle ; ce plafond ne constitue pas un budget mensuel garanti.
 
 ## Vérifications et limites
 
 `node --test tests/service.test.cjs` vérifie les identifiants, les mises à jour partielles, les révisions obsolètes, les nombres, l’isolation et la répétition des requêtes. Les tests réels ont vérifié deux clients, catalogue créé puis modifié, dossier incomplet complété, devis chiffré, versions V1/V2/V3, recherche exacte par chat, nouvelle conversation, absence d’accès dans un autre espace et vrais fichiers PDF distincts.
 
-L’aperçu utilise PDF.js 6.5.438, livré localement dans `assets/vendor/` avec sa licence Apache 2.0 ; aucun CDN n’exécute du code dans l’espace privé. Le téléchargement utilise le même fichier PDF que l’aperçu. La transcription utilise le webhook multipart historique et a été vérifiée avec un échantillon de parole réel ; une capture physique au microphone dépend du navigateur et de son autorisation.
+L’aperçu utilise PDF.js 6.5.438, livré localement dans `assets/vendor/` avec sa licence Apache 2.0 ; aucun CDN n’exécute du code dans l’espace privé. Le téléchargement utilise le même fichier PDF que l’aperçu. La transcription utilise désormais POST `cognalys/v2/audio` (multipart `audio` et `sessionId`). Elle renvoie `ok:true`, `sessionId` et `transcription` ; les erreurs sont explicites. WebM et M4A ont été vérifiés avec des fichiers de parole réels. La sélection du format du microphone suit les capacités du navigateur. Une capture physique dépend toujours de son autorisation.
 
 Limites assumées : usage de démonstration séquentiel. Les tables n8n ne fournissent pas de transaction métier ni de verrou distribué ; des écritures strictement simultanées dans plusieurs onglets peuvent créer des conflits, malgré les révisions et l’idempotence séquentielle. La table est relue par espace et n’est pas dimensionnée pour un gros historique. Les PDF sont des brouillons : identité légale du prestataire et conditions restent à renseigner. Le catalogue utilise un taux numérique de TVA, sans gestion fiscale avancée. Les quantités et unités sont choisies explicitement, sans déduction automatique des passages depuis la fréquence.
 
 ## Publication
 
 Seul `SabreDoree/app.cognalys-intelligence` est concerné. GitHub Pages sert `https://sabredoree.github.io/app.cognalys-intelligence/`. Le domaine demandé `app.cognalys-intelligence.fr` ne se résolvait pas en DNS lors de la reprise du 11 novembre 2026 ; sa remise en service exige une configuration DNS/hébergement hors de ce dépôt. Le dépôt vitrine `SabreDoree/cognalys-intelligence` n’est pas modifié.
+
+
+## Tests audio
+
+`node --test tests/audio.test.cjs` vérifie capture et arrêt des pistes, formats WebM/M4A, appel du webhook V2, transmission au chat, refus des sessions incohérentes, erreur serveur, relance sans duplication du texte et réponse tardive après changement de conversation. Ces tests simulent les API matérielles ; les tests HTTP utilisent des fichiers audio réels. Aucun quota OpenRouter ou mécanisme d’abonnement n’a été ajouté dans cette modification.

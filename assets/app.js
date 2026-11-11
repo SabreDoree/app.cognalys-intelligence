@@ -67,6 +67,7 @@
     const chat = s;
     if (!clip || chat.audio === 'transcribing') return;
     let messageToSend = '';
+    clip.draftBefore ??= chat.draft.trim();
     chat.audio = 'transcribing';
     chat.transcribed = false;
     chat.error = '';
@@ -77,22 +78,23 @@
       const body = new FormData();
       body.append('audio', clip.blob, clip.name);
       body.append('sessionId', chat.sessionId);
-      const response = await fetch('https://n8n.cognalys-intelligence.fr/webhook/transcription-audio-openrouter', {
-        method: 'POST', body, signal: controller.signal
+      const response = await fetch('https://n8n.cognalys-intelligence.fr/webhook/cognalys/v2/audio', {
+        method: 'POST', body, signal: controller.signal, credentials: 'omit',
+        redirect: 'error', cache: 'no-store', referrerPolicy: 'no-referrer'
       });
-      if (!response.ok) throw new Error('HTTP ' + response.status);
-      const data = await response.json();
-      const item = Array.isArray(data) ? data[0] : data;
-      const transcript = item?.transcription ?? item?.transcript ?? item?.text;
+      const item = await response.json();
+      if (!response.ok || item?.ok !== true) throw new Error(item?.error || 'Service de transcription indisponible (HTTP ' + response.status + ').');
+      if (item.sessionId !== chat.sessionId) throw new Error('La transcription ne correspond pas à cette conversation.');
+      const transcript = item.transcription;
       if (typeof transcript !== 'string' || !transcript.trim()) throw new Error('Transcription vide');
       if (s === chat && chat.clip === clip) {
-        chat.draft = [chat.draft.trim(), transcript.trim()].filter(Boolean).join(' ');
+        chat.draft = [clip.draftBefore, transcript.trim()].filter(Boolean).join(' ');
         chat.transcribed = true;
         messageToSend = chat.draft;
       }
     } catch (error) {
       if (s === chat && chat.clip === clip) chat.error = 'Transcription indisponible. Réessayez ou écrivez votre message. ' +
-        (error.message.startsWith('HTTP ') ? error.message : '');
+        (error.name === 'AbortError' ? 'Délai de transcription dépassé.' : error.message);
     } finally {
       clearTimeout(timeout);
       if (s === chat && chat.clip === clip) {
@@ -134,7 +136,9 @@
       const stream = await navigator.mediaDevices.getUserMedia({audio:true});
       if (capture !== job) { stream.getTracks().forEach(t => t.stop()); return; }
       job.stream = stream;
-      const recorder = job.recorder = new MediaRecorder(stream);
+      const mimeType = ['audio/webm;codecs=opus', 'audio/mp4', 'audio/webm', 'audio/ogg;codecs=opus']
+        .find(type => MediaRecorder.isTypeSupported?.(type));
+      const recorder = job.recorder = new MediaRecorder(stream, mimeType ? {mimeType} : undefined);
       recorder.ondataavailable = event => { if(event.data.size) job.parts.push(event.data); };
       recorder.onerror = () => {
         if (capture !== job) return;
@@ -212,3 +216,4 @@
  window.addEventListener('hashchange',()=>{syncHistorySession(s.sessionId);s.notice='';QuotePDF.closePreview();render(true);});
  render();reload();
 })();
+

@@ -1,0 +1,208 @@
+{
+  "id": "uytilDGsbu5B8aYS",
+  "name": "COGNALYS V2 - Transcription audio",
+  "nodes": [
+    {
+      "id": "74c2de07-859a-4667-aa72-b6245011a624",
+      "name": "Audio V2",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        80
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "cognalys/v2/audio",
+        "responseMode": "responseNode",
+        "options": {
+          "allowedOrigins": "https://app.cognalys-intelligence.fr,https://sabredoree.github.io"
+        }
+      },
+      "webhookId": "7bfd67e3-d93a-4004-85dd-ecf76e601402"
+    },
+    {
+      "id": "6fe19160-7649-46d8-9842-ef3637f72058",
+      "name": "Préparer audio",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        224,
+        80
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const item=$input.first();\nconst sessionId=String(item.json.body?.sessionId??item.json.sessionId??'').trim();\nconst fail=(error,statusCode=400)=>[{json:{ok:false,error,statusCode,sessionId}}];\nif(!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(sessionId))return fail('Identifiant de conversation invalide.');\nconst binary=item.binary??{};\nconst property=binary.audio?'audio':binary.data?'data':Object.keys(binary)[0];\nif(!property)return fail('Aucun enregistrement reçu. Envoyez un fichier dans le champ audio.');\nconst meta=binary[property];\nconst extension=String(meta.fileName??'').split('.').pop().toLowerCase();\nconst mime=String(meta.mimeType??'').toLowerCase();\nconst formats={mp3:'mp3',wav:'wav',wave:'wav',m4a:'m4a',mp4:'m4a',ogg:'ogg',oga:'ogg',webm:'webm',flac:'flac',aac:'aac'};\nconst format=formats[extension]||(mime.includes('webm')?'webm':mime.includes('mp4')?'m4a':mime.includes('ogg')?'ogg':mime.includes('wav')?'wav':mime.includes('flac')?'flac':mime.includes('mpeg')?'mp3':mime.includes('aac')?'aac':null);\nif(!format)return fail('Format audio non reconnu. Réessayez depuis le microphone.');\ntry{\n const buffer=await this.helpers.getBinaryDataBuffer(0,property);\n if(!buffer.length)return fail('L’enregistrement est vide. Réessayez.');\n return [{json:{ok:true,sessionId,audioFormat:format,audioBase64:buffer.toString('base64')}}];\n}catch{return fail('Impossible de lire l’enregistrement reçu.');}\n"
+      }
+    },
+    {
+      "id": "a0310e9e-adb8-4402-9d02-5547f105478c",
+      "name": "Audio valide ?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        448,
+        80
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      }
+    },
+    {
+      "id": "f5b3c9b7-9c34-4b5b-9958-d17332cb39f2",
+      "name": "Transcrire OpenRouter",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        672,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://openrouter.ai/api/v1/audio/transcriptions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBearerAuth",
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ {model:\"openai/whisper-1\",input_audio:{data:$json.audioBase64,format:$json.audioFormat},language:\"fr\"} }}",
+        "options": {
+          "timeout": 75000,
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "1ff26aa4-7c8f-436f-9681-73afe369885b",
+      "name": "Résultat transcription",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        896,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const sessionId=$('Préparer audio').first().json.sessionId;\nconst result=$input.first().json;\nconst text=typeof result.text==='string'?result.text.trim():'';\nif(result.error)return [{json:{ok:false,sessionId,error:'La transcription OpenRouter est indisponible. Réessayez.',statusCode:502}}];\nif(!text)return [{json:{ok:false,sessionId,error:'Aucune parole reconnue. Réessayez ou écrivez votre message.',statusCode:422}}];\nreturn [{json:{ok:true,sessionId,transcription:text,statusCode:200}}];\n"
+      }
+    },
+    {
+      "id": "d92f7a7b-b3c5-4ea6-9565-2ca857ee882b",
+      "name": "Répondre audio",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1120,
+        80
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ {ok:$json.ok,sessionId:$json.sessionId,...($json.ok?{transcription:$json.transcription}:{error:$json.error})} }}",
+        "options": {
+          "responseCode": "={{ $json.statusCode }}",
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Cache-Control",
+                "value": "no-store"
+              }
+            ]
+          }
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Audio V2": {
+      "main": [
+        [
+          {
+            "node": "Préparer audio",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Préparer audio": {
+      "main": [
+        [
+          {
+            "node": "Audio valide ?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Audio valide ?": {
+      "main": [
+        [
+          {
+            "node": "Transcrire OpenRouter",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Répondre audio",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Transcrire OpenRouter": {
+      "main": [
+        [
+          {
+            "node": "Résultat transcription",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Résultat transcription": {
+      "main": [
+        [
+          {
+            "node": "Répondre audio",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "availableInMCP": true,
+    "saveManualExecutions": false,
+    "saveDataErrorExecution": "none",
+    "saveDataSuccessExecution": "none"
+  },
+  "activeVersionId": "176913b0-e026-4fb5-b93c-7105e46fce80"
+}
