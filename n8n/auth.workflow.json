@@ -119,7 +119,7 @@
       ],
       "parameters": {
         "mode": "runOnceForAllItems",
-        "jsCode": "const u=$('Identité vérifiée').first().json;if(!u.authenticated)return [{json:{ok:false,authenticated:false,authorized:false,statusCode:401,error:u.error}}];const rows=$input.all().map(i=>i.json).filter(r=>r.uid===u.uid);const m=rows.length===1?rows[0]:null;const authorized=!!(m?.active===true&&/^[a-f0-9]{64}$/.test(m.scope));return [{json:{ok:true,authenticated:true,authorized,uid:u.uid,email:u.email,company:authorized?m.company:'',scope:authorized?m.scope:'',statusCode:authorized?200:403,error:authorized?'':'Compte créé. Votre espace attend son activation par Cognalys.'}}];"
+        "jsCode": "const u=$('Identité vérifiée').first().json;if(!u.authenticated)return [{json:{ok:false,authenticated:false,authorized:false,statusCode:401,error:u.error}}];const rows=$input.all().map(i=>i.json).filter(r=>r.uid===u.uid);const m=rows.length===1?rows[0]:null;const authorized=!!(m?.active===true&&/^[a-f0-9]{64}$/.test(m.scope));return [{json:{ok:true,authenticated:true,authorized,uid:u.uid,email:u.email,company:authorized?m.company:'',scope:authorized?m.scope:'',isAdmin:authorized&&u.uid==='TJFfqZBnzyfgpZRNmKGDwWnUltP2',statusCode:authorized?200:403,error:authorized?'':m?.status==='suspended'?'Accès suspendu. Contactez Cognalys pour régulariser votre abonnement.':m?.status==='rejected'?'Demande d’inscription refusée. Contactez Cognalys.':'Compte créé. Votre espace attend son activation par Cognalys.'}}];"
       }
     },
     {
@@ -148,6 +148,117 @@
         }
       },
       "webhookId": "17b60b91-a63d-4456-97cd-8e6ddd539cf0"
+    },
+    {
+      "id": "ea503741-19e5-49ab-991f-d855ac9e9594",
+      "name": "Nouvelle inscription ?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1150,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $('Identité vérifiée').first().json.authenticated === true && !$input.all().some(i=>i.json.uid === $('Identité vérifiée').first().json.uid) }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      }
+    },
+    {
+      "id": "88d058bb-8ac6-437a-b07c-4958ff6911b5",
+      "name": "Demande en attente",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1400,
+        -100
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const u=$('Identité vérifiée').first().json;return [{json:{uid:u.uid,email:u.email,scope:'',company:'',active:false,status:'pending'}}];"
+      }
+    },
+    {
+      "id": "fd0e1e93-10a6-466e-a625-d43477a2cf6e",
+      "name": "Conserver inscription",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        1600,
+        -100
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "insert",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "rGN4lPFNidKYXSDq",
+          "cachedResultName": "cognalys_memberships"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "schema": [
+            {
+              "id": "uid",
+              "displayName": "uid",
+              "type": "string",
+              "display": true,
+              "required": false
+            },
+            {
+              "id": "email",
+              "displayName": "email",
+              "type": "string",
+              "display": true,
+              "required": false
+            },
+            {
+              "id": "scope",
+              "displayName": "scope",
+              "type": "string",
+              "display": true,
+              "required": false
+            },
+            {
+              "id": "company",
+              "displayName": "company",
+              "type": "string",
+              "display": true,
+              "required": false
+            },
+            {
+              "id": "active",
+              "displayName": "active",
+              "type": "boolean",
+              "display": true,
+              "required": false
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "type": "string",
+              "display": true,
+              "required": false
+            }
+          ]
+        },
+        "options": {}
+      }
     }
   ],
   "connections": {
@@ -195,8 +306,37 @@
         ]
       ]
     },
+    "Compte web": {
+      "main": [
+        [
+          {
+            "node": "Préparer identité",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
     "Appartenance entreprise": {
       "main": [
+        [
+          {
+            "node": "Nouvelle inscription ?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Nouvelle inscription ?": {
+      "main": [
+        [
+          {
+            "node": "Demande en attente",
+            "type": "main",
+            "index": 0
+          }
+        ],
         [
           {
             "node": "Accès entreprise",
@@ -206,11 +346,22 @@
         ]
       ]
     },
-    "Compte web": {
+    "Demande en attente": {
       "main": [
         [
           {
-            "node": "Préparer identité",
+            "node": "Conserver inscription",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Conserver inscription": {
+      "main": [
+        [
+          {
+            "node": "Accès entreprise",
             "type": "main",
             "index": 0
           }

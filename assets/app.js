@@ -1,7 +1,7 @@
 'use strict';
 (()=>{
  const main=document.querySelector('main');let page,capture,toastClock;
- const fresh=sessionId=>({sessionId,fields:{},messages:[],draft:'',pending:false,error:'',audio:'idle',transcribed:false,dossiers:[],catalog:[],quotes:[],dossierDraft:{},catalogDraft:{},quoteDraft:{lines:[{catalogId:'',quantity:''}]},busy:false,loading:false,notice:'',history:false,presentationDraft:{}});
+ const fresh=sessionId=>({sessionId,fields:{},messages:[],draft:'',pending:false,error:'',audio:'idle',transcribed:false,dossiers:[],catalog:[],quotes:[],dossierDraft:{},catalogDraft:{},quoteDraft:{lines:[{catalogId:'',quantity:''}]},busy:false,loading:false,notice:'',history:false,members:[],presentationDraft:{}});
   const sessionKey = 'cognalys.conversation';
   const sessionUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
   let useHistoryFallback = false;
@@ -42,15 +42,16 @@
  function go(hash){location.hash=hash;}
  function toast(text){const el=document.querySelector('#toast');el.textContent=text;el.classList.add('visible');clearTimeout(toastClock);toastClock=setTimeout(()=>el.classList.remove('visible'),4000);}
  function render(focus=false){
-  const account=CognalysAuth.state;
+  const account=CognalysAuth.state;const adminNav=document.querySelector('#admin-nav');if(adminNav){adminNav.hidden=!account.access?.isAdmin;adminNav.style.display=account.access?.isAdmin?'':'none';}
   if(!account.ready||!account.user||!account.access?.authorized){main.innerHTML=Views.login(account,s);document.title='Connexion · Cognalys Intelligence';return;}
   const hash=location.hash.slice(1)||'accueil';page=hash==='verification'?'formulaire':hash;
   if(page!=='conversation')cancelCapture();
-  const views={accueil:Views.home,conversation:Views.conversation,formulaire:Views.dossiers,dossiers:Views.dossiers,parametres:Views.settings,devis:Views.composer,'devis-pdf':x=>'<h1>Devis PDF</h1>'+Views.status(x)+'<section class="box">'+Views.pdfPanel(x)+'</section>',espace:Views.settings};
+  const views={accueil:Views.home,conversation:Views.conversation,formulaire:Views.dossiers,dossiers:Views.dossiers,parametres:Views.settings,devis:Views.composer,'devis-pdf':x=>'<h1>Devis PDF</h1>'+Views.status(x)+'<section class="box">'+Views.pdfPanel(x)+'</section>',espace:Views.settings,administration:Views.administration};
   main.innerHTML=(views[page]||Views.home)(s);
   if(page==='conversation')main.insertAdjacentHTML('beforeend','<button class="reset" data-act="new-chat" '+(s.pending?'disabled':'')+'>Nouvelle conversation</button><section class="box">'+Views.pdfPanel(s)+'</section>');
   document.title=(main.querySelector('h1')?.textContent||'Cognalys')+' · Cognalys Intelligence';if(focus){window.scrollTo(0,0);main.focus({preventScroll:true});}
  }
+ async function reloadAdmin(){if(!CognalysAuth.state.access?.isAdmin)return;const state=s;try{const r=await QuoteAPI.call(state.sessionId,'admin.list');if(s===state){state.members=r.members;render();}}catch(e){if(s===state){state.error=e.message;render();}}}
  async function reload(){
   if(!CognalysAuth.state.access?.authorized)return;
   const chat=s;chat.loading=true;render();
@@ -187,6 +188,7 @@
  document.addEventListener('click',e=>{
   if(e.target.closest('.skip')){e.preventDefault();main.focus();return;}
   const el=e.target.closest('button');if(!el||s.busy)return;
+  if(el.dataset.adminAction){if(!CognalysAuth.state.access?.isAdmin)return;const m=s.members.find(m=>m.uid===el.dataset.uid);if(!m)return;const company=el.closest('[data-member]').querySelector('input')?.value||m.company;operation(async()=>{await QuoteAPI.call(s.sessionId,'admin.'+el.dataset.adminAction,{uid:m.uid,updatedAt:m.updatedAt,company});s.notice='Modification d’accès confirmée par le serveur.';await reloadAdmin();});return;}
   if(el.dataset.pdf){const q=s.quotes.find(q=>q.token===el.dataset.token);if(q)operation(()=>QuotePDF.action(s.sessionId,q,el.dataset.pdf));return;}
   if(el.dataset.editDossier){s.dossierDraft={...s.dossiers.find(d=>d.dossierId===el.dataset.editDossier)};render();return;}
   if(el.dataset.editCatalog){s.catalogDraft={...s.catalog.find(c=>c.id===el.dataset.editCatalog)};render();return;}
@@ -199,6 +201,7 @@
    case 'logout':CognalysAuth.logout().catch(e=>{s.error=e.message;render();});break;
    case 'check-access':CognalysAuth.check();break;
    case 'auth-mode':s.signup=!s.signup;s.error='';render();break;
+   case 'reload-admin':reloadAdmin();break;
    case 'reload':s.error='';reload();break;
    case 'new-dossier':s.dossierDraft={};render();break;
    case 'new-catalog':s.catalogDraft={};render();break;
@@ -221,12 +224,12 @@
   if(f.id==='quote-form')operation(async()=>{const d=s.quoteDraft,old=s.quotes.find(q=>q.token===d.token);const params=old?{token:old.token,quantities:d.lines.filter(l=>l.lineId).map(l=>({lineId:l.lineId,quantity:Number(l.quantity)})),removeLineIds:old.lines.filter(l=>!d.lines.some(x=>x.lineId===l.lineId)).map(l=>l.lineId),addLines:d.lines.filter(l=>!l.lineId).map(l=>({catalogId:l.catalogId,quantity:Number(l.quantity)})),reason:d.reason||'Correction demandée'}:{dossierId:d.dossierId,lines:d.lines.map(l=>({catalogId:l.catalogId,quantity:Number(l.quantity)})),reason:d.reason||'Création'};
    const result=await QuoteAPI.call(s.sessionId,old?'quote.revise':'quote.create',params);s.notice='PDF confirmé : '+result.quote.numero;s.quoteDraft={lines:[{catalogId:'',quantity:''}]};await reload();go('devis-pdf');await QuotePDF.action(s.sessionId,result.quote,'preview');});
  });
- window.addEventListener('hashchange',()=>{syncHistorySession(s.sessionId);s.notice='';QuotePDF.closePreview();render(true);});
+ window.addEventListener('hashchange',()=>{syncHistorySession(s.sessionId);s.notice='';QuotePDF.closePreview();render(true);if(page==='administration')reloadAdmin();});
  let signedIdentity='';
  let knownUser;try{knownUser=sessionStorage.getItem('cognalys.account.uid');}catch{}
  CognalysAuth.subscribe(()=>{
   const a=CognalysAuth.state;const current=a.user?.uid+'|'+(a.access?.authorized?a.access.scope:'');
-  if(current!==signedIdentity){cancelCapture();QuotePDF.closePreview();for(const m of s.messages)if(m.audioUrl)URL.revokeObjectURL(m.audioUrl);if(s.clip)URL.revokeObjectURL(s.clip.url);const uid=a.user?.uid||'';s=fresh(startSession(knownUser!==uid));knownUser=uid;try{sessionStorage.setItem('cognalys.account.uid',uid);}catch{}signedIdentity=current;render();if(a.access?.authorized)reload();}else render();
+  if(current!==signedIdentity){cancelCapture();QuotePDF.closePreview();for(const m of s.messages)if(m.audioUrl)URL.revokeObjectURL(m.audioUrl);if(s.clip)URL.revokeObjectURL(s.clip.url);const uid=a.user?.uid||'';s=fresh(startSession(knownUser!==uid));knownUser=uid;try{sessionStorage.setItem('cognalys.account.uid',uid);}catch{}signedIdentity=current;render();if(a.access?.authorized){reload();if(location.hash==='#administration')reloadAdmin();}}else render();
  });
  render();
 })();

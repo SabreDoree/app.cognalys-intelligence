@@ -10,6 +10,12 @@ function normalize(raw) {
   if(JSON.stringify(params).length>(p.command==='settings.save'?500000:40000)) throw Error('Demande trop volumineuse.');
   return {idToken:p.idToken,sessionId:p.sessionId,command:String(p.command||''),params,requestId:String(p.requestId||'')};
 }
+function legalWarnings(p,client={}){
+ const missing=[];for(const [k,label] of Object.entries({companyName:'raison sociale',legalForm:'forme juridique',street:'adresse de l’entreprise',postalCode:'code postal',city:'ville',siren:'SIREN',paymentTerms:'modalités de paiement',executionTerms:'date ou délai d’exécution'}))if(!p[k])missing.push(label);
+ if(p.vatMode!=='franchise'&&!p.vatNumber)missing.push('numéro de TVA');
+ if(!client.adresse_facturation)missing.push('adresse du client');
+ return missing;
+}
 function service(req, rows, token, now=new Date().toISOString()) {
   const p=req.params, command=req.command;
   const clean=(v,max=1000)=>{if(typeof v!=='string'||v.length>max)throw Error('Texte invalide ou trop long.');return v.trim();};
@@ -17,7 +23,7 @@ function service(req, rows, token, now=new Date().toISOString()) {
   const num=(v,min,max,dec=2)=>{if((typeof v!=='number'&&typeof v!=='string')||String(v).trim()===''||!/^\d+(\.\d+)?$/.test(String(v)))throw Error('Nombre requis.');const n=Number(v);if(!Number.isFinite(n)||n<min||n>max||Math.abs(n*10**dec-Math.round(n*10**dec))>1e-6)throw Error('Nombre hors limites.');return n;};
   const events=rows.filter(r=>r.scope===req.scope&&r.payload).sort((a,b)=>Number(a.id)-Number(b.id)).map(r=>{const data=JSON.parse(r.payload);const request=data._request;delete data._request;return {...r,request,data};});
   const latest=kind=>{const m=new Map();for(const e of events.filter(e=>e.kind===kind))m.set(e.entity,e.data);return [...m.values()];};
-  const defaults={revision:0,companyName:'',companyDetails:'',primaryColor:'#3E7CE0',accentColor:'#E9F0FA',logo:'',intro:'',comments:'',footer:''};
+  const defaults={revision:0,companyName:'',companyDetails:'',street:'',addressExtra:'',postalCode:'',city:'',country:'France',legalForm:'',siren:'',siret:'',rcsCity:'',capital:'',vatMode:'standard',vatNumber:'',companyEmail:'',companyPhone:'',validityDays:30,paymentTerms:'',executionTerms:'',insuranceInfo:'',sapNumber:'',mediator:'',depositPercent:0,primaryColor:'#3E7CE0',accentColor:'#E9F0FA',logo:'',intro:'',comments:'',footer:''};
   const settings=latest('settings')[0]||defaults;
   const catalog=latest('catalog'), dossiers=latest('dossier'), quotes=events.filter(e=>e.kind==='quote').map(e=>e.data);
   const headQuotes=()=>quotes.filter(q=>!quotes.some(r=>r.parentToken===q.token));
@@ -39,6 +45,22 @@ function service(req, rows, token, now=new Date().toISOString()) {
     for(const k of ['primaryColor','accentColor']){if(!/^#[0-9a-f]{6}$/i.test(p[k]||''))throw Error('Couleur hexadécimale invalide.');next[k]=p[k];}
     const logo=p.logo??'';if(typeof logo!=='string'||logo.length>350000)throw Error('Logo trop volumineux (250 Ko maximum).');
     if(logo){const m=logo.match(/^data:image\/(png|jpeg);base64,([A-Za-z0-9+/]+={0,2})$/);if(!m)throw Error('Logo PNG ou JPEG requis.');const b=Buffer.from(m[2],'base64');if(b.length>256000||!(m[1]==='png'?b.subarray(0,8).toString('hex')==='89504e470d0a1a0a':b[0]===255&&b[1]===216&&b[2]===255))throw Error('Fichier logo invalide.');}
+    const textFields=['street','addressExtra','postalCode','city','legalForm','siren','siret','rcsCity','vatNumber','companyEmail','companyPhone','paymentTerms','executionTerms','insuranceInfo','sapNumber','mediator'];
+    for(const k of textFields)next[k]=clean(p[k]??'',k.endsWith('Terms')||k==='insuranceInfo'||k==='mediator'?1500:160);
+    next.country='France';next.companyDetails='';
+    if(!next.companyName||!next.street||!next.city||!/^\d{5}$/.test(next.postalCode))throw Error('Nom, adresse, code postal français à cinq chiffres et ville requis.');
+    if(!['EI','SAS','SASU','SARL','EURL','SA','SNC','Association','Autre'].includes(next.legalForm))throw Error('Forme juridique requise.');
+    const luhn=s=>[...s].reverse().reduce((a,c,i)=>{let v=Number(c)*(i%2?2:1);return a+(v>9?v-9:v)},0)%10===0;
+    if(!/^\d{9}$/.test(next.siren)||/^0{9}$/.test(next.siren)||!luhn(next.siren))throw Error('SIREN invalide : neuf chiffres et clé de contrôle requis.');
+    if(next.siret&&(!/^\d{14}$/.test(next.siret)||!next.siret.startsWith(next.siren)||!luhn(next.siret)))throw Error('SIRET invalide ou différent du SIREN.');
+    const company=['SAS','SASU','SARL','EURL','SA','SNC'].includes(next.legalForm);
+    next.capital=company?num(p.capital,0,100000000000):'';
+    if(company&&!next.rcsCity)throw Error('Ville du RCS requise pour une société commerciale.');
+    if(!['standard','franchise'].includes(p.vatMode))throw Error('Choisissez le régime de TVA.');next.vatMode=p.vatMode;
+    if(next.vatMode==='standard'&&(!/^FR[A-Z0-9]{2}\d{9}$/.test(next.vatNumber)||!next.vatNumber.endsWith(next.siren)))throw Error('Numéro de TVA français requis et cohérent avec le SIREN.');
+    if(next.companyEmail&&!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(next.companyEmail))throw Error('E-mail de l’entreprise invalide.');
+    next.validityDays=num(p.validityDays,1,365,0);next.depositPercent=num(p.depositPercent??0,0,100);
+    if(!next.paymentTerms||!next.executionTerms)throw Error('Modalités de paiement et date ou délai d’exécution requis.');
     next.logo=logo;return write('settings','company',next,{settings:next});
   }
   if(command==='catalog.list')return out({items:catalog.filter(x=>!x.deleted)});
@@ -78,10 +100,11 @@ function service(req, rows, token, now=new Date().toISOString()) {
     const old=command==='quote.revise'?getQuote():null;
     if(old&&(!decorate(old).current||decorate(old).conflict)){const heads=current(old);return {result:{ok:false,error:'Version ancienne ou ambiguë. Relire quote.find avec le quoteId sans suffixe de version avant correction.',quoteId:old.quoteId,currentQuote:heads.length===1?decorate(heads[0]):null},write:false,pdf:false};}
     const client=getDossier(old?.dossierId||p.dossierId);
+    if(old&&(old.presentation?.vatMode||'standard')!==(settings.vatMode||'standard'))throw Error('Le régime de TVA a changé : créez un nouveau devis pour recalculer toutes ses lignes.');
     let lines;
     const makeLine=(l,index)=>{
       const c=one(catalog.filter(c=>c.id===l.catalogId&&!c.deleted&&c.active),'Désignation active');
-      const quantity=num(l.quantity,0.001,1000000,3),price=c.price,vat=c.vat;
+      const quantity=num(l.quantity,0.001,1000000,3),price=c.price,vat=settings.vatMode==='franchise'?0:c.vat;
       const ht=Math.round(Math.round(quantity*1000)*Math.round(price*100)/1000),tax=Math.round(ht*Math.round(vat*100)/10000);
       if(ht>100000000000)throw Error('Montant de ligne trop élevé.');
       return {lineId:token+'-'+index,catalogId:c.id,catalogRevision:c.revision,label:c.label,description:c.description,unit:c.unit,quantity,price,vat,htCents:ht,vatCents:tax};
@@ -96,9 +119,9 @@ function service(req, rows, token, now=new Date().toISOString()) {
     const htCents=lines.reduce((s,l)=>s+l.htCents,0),vatCents=lines.reduce((s,l)=>s+l.vatCents,0);
     const quoteId=old?.quoteId||'DEV-'+now.slice(0,10).replace(/-/g,'')+'-'+token.replace(/-/g,'').slice(0,12).toUpperCase();
     const version=(old?.version||0)+1;
-    const quote={presentation:JSON.parse(JSON.stringify(settings)),quoteId,numero:quoteId+'-V'+version,token,version,parentToken:old?.token||null,dossierId:client.dossierId,clientName:client.clientName,client:{...client},sessionId:req.sessionId,createdAt:now,lines,htCents,vatCents,ttcCents:htCents+vatCents,status:'brouillon',reason:clean(p.reason||'Création',500)};
+    const quote={missingInformation:legalWarnings(settings,client),validUntil:new Date(new Date(now).getTime()+(settings.validityDays||30)*86400000).toISOString(),presentation:JSON.parse(JSON.stringify(settings)),quoteId,numero:quoteId+'-V'+version,token,version,parentToken:old?.token||null,dossierId:client.dossierId,clientName:client.clientName,client:{...client},sessionId:req.sessionId,createdAt:now,lines,htCents,vatCents,ttcCents:htCents+vatCents,status:'brouillon',reason:clean(p.reason||'Création',500)};
     return write('quote',quoteId,quote,{quote:{...quote,current:true,conflict:false,stale:false}},true);
   }
   throw Error('Commande inconnue.');
 }
-module.exports={normalize,service};
+module.exports={normalize,service,legalWarnings};

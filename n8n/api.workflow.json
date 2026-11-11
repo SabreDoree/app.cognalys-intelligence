@@ -100,7 +100,7 @@
       ],
       "parameters": {
         "mode": "runOnceForAllItems",
-        "jsCode": "'use strict';\nconst UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;\nfunction normalize(raw) {\n  const p=raw.body ?? raw;\n  if(typeof p.idToken!=='string'||!p.idToken) throw Error('Connexion requise.');\n  if(!UUID.test(p.sessionId||'')) throw Error('sessionId doit être un UUID de conversation, jamais un dossierId.');\n  let params=p.params??{};\n  if(typeof params==='string') {try{params=JSON.parse(params);}catch{throw Error('Paramètres JSON invalides.');}}\n  if(!params||Array.isArray(params)||typeof params!=='object') throw Error('Paramètres invalides.');\n  if(JSON.stringify(params).length>(p.command==='settings.save'?500000:40000)) throw Error('Demande trop volumineuse.');\n  return {idToken:p.idToken,sessionId:p.sessionId,command:String(p.command||''),params,requestId:String(p.requestId||'')};\n}\nfunction service(req, rows, token, now=new Date().toISOString()) {\n  const p=req.params, command=req.command;\n  const clean=(v,max=1000)=>{if(typeof v!=='string'||v.length>max)throw Error('Texte invalide ou trop long.');return v.trim();};\n  const norm=v=>String(v??'').normalize('NFD').replace(/[\\u0300-\\u036f]/g,'').toLowerCase().trim().replace(/\\s+/g,' ');\n  const num=(v,min,max,dec=2)=>{if((typeof v!=='number'&&typeof v!=='string')||String(v).trim()===''||!/^\\d+(\\.\\d+)?$/.test(String(v)))throw Error('Nombre requis.');const n=Number(v);if(!Number.isFinite(n)||n<min||n>max||Math.abs(n*10**dec-Math.round(n*10**dec))>1e-6)throw Error('Nombre hors limites.');return n;};\n  const events=rows.filter(r=>r.scope===req.scope&&r.payload).sort((a,b)=>Number(a.id)-Number(b.id)).map(r=>{const data=JSON.parse(r.payload);const request=data._request;delete data._request;return {...r,request,data};});\n  const latest=kind=>{const m=new Map();for(const e of events.filter(e=>e.kind===kind))m.set(e.entity,e.data);return [...m.values()];};\n  const defaults={revision:0,companyName:'',companyDetails:'',primaryColor:'#3E7CE0',accentColor:'#E9F0FA',logo:'',intro:'',comments:'',footer:''};\n  const settings=latest('settings')[0]||defaults;\n  const catalog=latest('catalog'), dossiers=latest('dossier'), quotes=events.filter(e=>e.kind==='quote').map(e=>e.data);\n  const headQuotes=()=>quotes.filter(q=>!quotes.some(r=>r.parentToken===q.token));\n  const current=q=>headQuotes().filter(r=>r.quoteId===q.quoteId);\n  const decorate=q=>({...q,current:current(q).some(x=>x.token===q.token),conflict:current(q).length>1,stale:dossiers.find(d=>d.dossierId===q.dossierId)?.revision!==q.client.revision});\n  const out=result=>({result:{ok:true,...result},write:false,pdf:false});\n  const write=(kind,entity,data,result,pdf=false)=>({result:{ok:true,...result},write:true,pdf,event:{scope:req.scope,kind,entity,requestId:req.requestId,payload:JSON.stringify({...data,_request:JSON.stringify({command,params:p})})}});\n  const lookup=(list,ref,fields)=>list.filter(r=>fields.some(f=>norm(r[f])&&norm(r[f])===norm(ref)));\n  const one=(list,label)=>{if(list.length!==1)throw Error(list.length?'Plusieurs '+label+' correspondent : précisez l’identifiant.':label+' introuvable dans cet espace.');return list[0];};\n  const getDossier=id=>one(dossiers.filter(d=>d.dossierId===id),'Dossier');\n  const getQuote=()=>{if(p.token)return one(quotes.filter(q=>q.token===p.token),'Devis');let found=lookup(quotes,p.ref||p.quoteId||p.dossierId,['quoteId','numero','dossierId','clientName']);if(!found.length&&p.ref){const ds=dossiers.filter(d=>[d.nom_client,d.prenom_client,d.clientName,d.dossierId].some(v=>norm(v)===norm(p.ref)));found=quotes.filter(q=>ds.some(d=>d.dossierId===q.dossierId));}if(p.version)found=found.filter(q=>q.version===Number(p.version));else if(!quotes.some(q=>norm(q.numero)===norm(p.ref)))found=found.filter(q=>headQuotes().some(h=>h.token===q.token));return one(found,'Devis');};\n  const isWrite=['settings.save','catalog.save','catalog.delete','dossier.save','quote.create','quote.revise'].includes(command);\n  if(isWrite){if(!UUID.test(req.requestId))throw Error('requestId UUID obligatoire.');const prior=events.find(e=>e.requestId===req.requestId);if(prior){if(prior.request!==JSON.stringify({command,params:p}))throw Error('requestId déjà utilisé pour une autre opération.');if(prior.kind!==command.split('.')[0])throw Error('requestId déjà utilisé.');return out({replayed:true,[prior.kind==='quote'?'quote':prior.kind==='settings'?'settings':prior.kind==='dossier'?'dossier':'item']:prior.kind==='quote'?decorate(prior.data):prior.data});}}\n  if(command==='settings.get')return out({settings});\n  if(command==='settings.save'){\n    if(p.revision!==settings.revision)throw Error('Paramètres modifiés entre-temps. Actualisez avant de réessayer.');\n    const next={revision:settings.revision+1};\n    for(const k of ['companyName','companyDetails','intro','comments','footer'])next[k]=clean(p[k]??'',k==='companyName'?160:3000);\n    for(const k of ['primaryColor','accentColor']){if(!/^#[0-9a-f]{6}$/i.test(p[k]||''))throw Error('Couleur hexadécimale invalide.');next[k]=p[k];}\n    const logo=p.logo??'';if(typeof logo!=='string'||logo.length>350000)throw Error('Logo trop volumineux (250 Ko maximum).');\n    if(logo){const m=logo.match(/^data:image\\/(png|jpeg);base64,([A-Za-z0-9+/]+={0,2})$/);if(!m)throw Error('Logo PNG ou JPEG requis.');const b=Buffer.from(m[2],'base64');if(b.length>256000||!(m[1]==='png'?b.subarray(0,8).toString('hex')==='89504e470d0a1a0a':b[0]===255&&b[1]===216&&b[2]===255))throw Error('Fichier logo invalide.');}\n    next.logo=logo;return write('settings','company',next,{settings:next});\n  }\n  if(command==='catalog.list')return out({items:catalog.filter(x=>!x.deleted)});\n  if(command==='catalog.save'||command==='catalog.delete'){\n    const old=p.id?one(catalog.filter(c=>c.id===p.id&&!c.deleted),'Désignation'):null;\n    if(old&&p.revision!==old.revision)throw Error('Catalogue modifié entre-temps. Rechargez avant d’enregistrer.');\n    if(command==='catalog.delete'){\n      if(quotes.some(q=>q.lines.some(l=>l.catalogId===old.id)))throw Error('Désignation utilisée : désactivez-la pour conserver son historique.');\n      const item={...old,deleted:true,active:false,revision:old.revision+1};return write('catalog',item.id,item,{item});\n    }\n    const label=clean(p.label,160),description=clean(p.description??'',1000),unit=clean(p.unit,30);\n    if(!label||!unit)throw Error('Libellé et unité requis.');\n    const item={id:old?.id||'CAT-'+token,label,description,unit,price:num(p.price,0,1000000),vat:num(p.vat,0,100),active:p.active!==false,revision:(old?.revision||0)+1,deleted:false};\n    return write('catalog',item.id,item,{item});\n  }\n  if(command==='dossier.list')return out({dossiers});\n  if(command==='dossier.search'){\n    const result=lookup(dossiers,clean(p.ref||'',160),['dossierId','nom_client','prenom_client','clientName']);\n    return out({status:result.length===1?'trouve':result.length?'ambigu':'introuvable',dossiers:result});\n  }\n  if(command==='dossier.save'){\n    const old=p.dossierId?getDossier(p.dossierId):null;\n    if(old&&p.revision!==old.revision)throw Error('Dossier modifié entre-temps. Recherchez-le à nouveau.');\n    const fields=['nom_client','prenom_client','prestation','surface','adresse_chantier','adresse_facturation','frequence','notes'];\n    const dossier={...(old||{}),dossierId:old?.dossierId||'DOS-'+token,sessionId:old?.sessionId||req.sessionId,revision:(old?.revision||0)+1,updatedAt:now};\n    const changes=p.fields;if(!changes||typeof changes!=='object'||Array.isArray(changes))throw Error('Champs de dossier requis.');\n    for(const key of Object.keys(changes))if(!fields.includes(key))throw Error('Champ de dossier inconnu : '+key);\n    for(const key of fields)dossier[key]=Object.hasOwn(changes,key)?clean(changes[key],key==='notes'?2000:1000):String(old?.[key]||'');\n    dossier.clientName=[dossier.prenom_client,dossier.nom_client].filter(Boolean).join(' ');\n    if(!dossier.clientName||!dossier.prestation)throw Error('Client identifiable et prestation requis ; les autres champs sont facultatifs.');\n    if(!old&&dossiers.some(d=>norm(d.clientName)===norm(dossier.clientName)&&norm(d.prestation)===norm(dossier.prestation))&&!p.confirmNew)throw Error('Demande similaire existante. Recherchez le dossier ou confirmez une nouvelle demande distincte.');\n    return write('dossier',dossier.dossierId,dossier,{dossier});\n  }\n  if(command==='quote.list')return out({quotes:(p.history?quotes:headQuotes()).map(decorate).reverse()});\n  if(command==='quote.find') {const quote=decorate(getQuote());return out({quote});}\n  if(command==='quote.create'||command==='quote.revise'){\n    const old=command==='quote.revise'?getQuote():null;\n    if(old&&(!decorate(old).current||decorate(old).conflict)){const heads=current(old);return {result:{ok:false,error:'Version ancienne ou ambiguë. Relire quote.find avec le quoteId sans suffixe de version avant correction.',quoteId:old.quoteId,currentQuote:heads.length===1?decorate(heads[0]):null},write:false,pdf:false};}\n    const client=getDossier(old?.dossierId||p.dossierId);\n    let lines;\n    const makeLine=(l,index)=>{\n      const c=one(catalog.filter(c=>c.id===l.catalogId&&!c.deleted&&c.active),'Désignation active');\n      const quantity=num(l.quantity,0.001,1000000,3),price=c.price,vat=c.vat;\n      const ht=Math.round(Math.round(quantity*1000)*Math.round(price*100)/1000),tax=Math.round(ht*Math.round(vat*100)/10000);\n      if(ht>100000000000)throw Error('Montant de ligne trop élevé.');\n      return {lineId:token+'-'+index,catalogId:c.id,catalogRevision:c.revision,label:c.label,description:c.description,unit:c.unit,quantity,price,vat,htCents:ht,vatCents:tax};\n    };\n    if(old){\n      lines=old.lines.map(l=>({...l}));\n      if(p.quantities){for(const change of p.quantities){const l=one(lines.filter(l=>l.lineId===change.lineId),'Ligne');l.quantity=num(change.quantity,0.001,1000000,3);l.htCents=Math.round(Math.round(l.quantity*1000)*Math.round(l.price*100)/1000);l.vatCents=Math.round(l.htCents*Math.round(l.vat*100)/10000);}}\n      if(p.removeLineIds){if(!Array.isArray(p.removeLineIds))throw Error('Liste de lignes invalide.');for(const id of p.removeLineIds)one(lines.filter(l=>l.lineId===id),'Ligne');lines=lines.filter(l=>!p.removeLineIds.includes(l.lineId));}\n      if(p.addLines){if(!Array.isArray(p.addLines))throw Error('Lignes invalides.');lines.push(...p.addLines.map(makeLine));}\n    }else{if(!Array.isArray(p.lines))throw Error('Sélectionnez les désignations et quantités.');lines=p.lines.map(makeLine);}\n    if(!lines.length||lines.length>50)throw Error('Le devis doit comporter entre 1 et 50 lignes chiffrées.');\n    const htCents=lines.reduce((s,l)=>s+l.htCents,0),vatCents=lines.reduce((s,l)=>s+l.vatCents,0);\n    const quoteId=old?.quoteId||'DEV-'+now.slice(0,10).replace(/-/g,'')+'-'+token.replace(/-/g,'').slice(0,12).toUpperCase();\n    const version=(old?.version||0)+1;\n    const quote={presentation:JSON.parse(JSON.stringify(settings)),quoteId,numero:quoteId+'-V'+version,token,version,parentToken:old?.token||null,dossierId:client.dossierId,clientName:client.clientName,client:{...client},sessionId:req.sessionId,createdAt:now,lines,htCents,vatCents,ttcCents:htCents+vatCents,status:'brouillon',reason:clean(p.reason||'Création',500)};\n    return write('quote',quoteId,quote,{quote:{...quote,current:true,conflict:false,stale:false}},true);\n  }\n  throw Error('Commande inconnue.');\n}\ntry {const req=$('Espace privé').first().json;req.requestId=req.requestId||$('Jeton version').first().json.token;return [{json:service(req,$input.all().map(i=>i.json),$('Jeton version').first().json.token)}];} catch(e){return [{json:{result:{ok:false,error:e.message},write:false,pdf:false}}];}"
+        "jsCode": "'use strict';\nconst UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;\nfunction normalize(raw) {\n  const p=raw.body ?? raw;\n  if(typeof p.idToken!=='string'||!p.idToken) throw Error('Connexion requise.');\n  if(!UUID.test(p.sessionId||'')) throw Error('sessionId doit être un UUID de conversation, jamais un dossierId.');\n  let params=p.params??{};\n  if(typeof params==='string') {try{params=JSON.parse(params);}catch{throw Error('Paramètres JSON invalides.');}}\n  if(!params||Array.isArray(params)||typeof params!=='object') throw Error('Paramètres invalides.');\n  if(JSON.stringify(params).length>(p.command==='settings.save'?500000:40000)) throw Error('Demande trop volumineuse.');\n  return {idToken:p.idToken,sessionId:p.sessionId,command:String(p.command||''),params,requestId:String(p.requestId||'')};\n}\nfunction legalWarnings(p,client={}){\n const missing=[];for(const [k,label] of Object.entries({companyName:'raison sociale',legalForm:'forme juridique',street:'adresse de l’entreprise',postalCode:'code postal',city:'ville',siren:'SIREN',paymentTerms:'modalités de paiement',executionTerms:'date ou délai d’exécution'}))if(!p[k])missing.push(label);\n if(p.vatMode!=='franchise'&&!p.vatNumber)missing.push('numéro de TVA');\n if(!client.adresse_facturation)missing.push('adresse du client');\n return missing;\n}\nfunction service(req, rows, token, now=new Date().toISOString()) {\n  const p=req.params, command=req.command;\n  const clean=(v,max=1000)=>{if(typeof v!=='string'||v.length>max)throw Error('Texte invalide ou trop long.');return v.trim();};\n  const norm=v=>String(v??'').normalize('NFD').replace(/[\\u0300-\\u036f]/g,'').toLowerCase().trim().replace(/\\s+/g,' ');\n  const num=(v,min,max,dec=2)=>{if((typeof v!=='number'&&typeof v!=='string')||String(v).trim()===''||!/^\\d+(\\.\\d+)?$/.test(String(v)))throw Error('Nombre requis.');const n=Number(v);if(!Number.isFinite(n)||n<min||n>max||Math.abs(n*10**dec-Math.round(n*10**dec))>1e-6)throw Error('Nombre hors limites.');return n;};\n  const events=rows.filter(r=>r.scope===req.scope&&r.payload).sort((a,b)=>Number(a.id)-Number(b.id)).map(r=>{const data=JSON.parse(r.payload);const request=data._request;delete data._request;return {...r,request,data};});\n  const latest=kind=>{const m=new Map();for(const e of events.filter(e=>e.kind===kind))m.set(e.entity,e.data);return [...m.values()];};\n  const defaults={revision:0,companyName:'',companyDetails:'',street:'',addressExtra:'',postalCode:'',city:'',country:'France',legalForm:'',siren:'',siret:'',rcsCity:'',capital:'',vatMode:'standard',vatNumber:'',companyEmail:'',companyPhone:'',validityDays:30,paymentTerms:'',executionTerms:'',insuranceInfo:'',sapNumber:'',mediator:'',depositPercent:0,primaryColor:'#3E7CE0',accentColor:'#E9F0FA',logo:'',intro:'',comments:'',footer:''};\n  const settings=latest('settings')[0]||defaults;\n  const catalog=latest('catalog'), dossiers=latest('dossier'), quotes=events.filter(e=>e.kind==='quote').map(e=>e.data);\n  const headQuotes=()=>quotes.filter(q=>!quotes.some(r=>r.parentToken===q.token));\n  const current=q=>headQuotes().filter(r=>r.quoteId===q.quoteId);\n  const decorate=q=>({...q,current:current(q).some(x=>x.token===q.token),conflict:current(q).length>1,stale:dossiers.find(d=>d.dossierId===q.dossierId)?.revision!==q.client.revision});\n  const out=result=>({result:{ok:true,...result},write:false,pdf:false});\n  const write=(kind,entity,data,result,pdf=false)=>({result:{ok:true,...result},write:true,pdf,event:{scope:req.scope,kind,entity,requestId:req.requestId,payload:JSON.stringify({...data,_request:JSON.stringify({command,params:p})})}});\n  const lookup=(list,ref,fields)=>list.filter(r=>fields.some(f=>norm(r[f])&&norm(r[f])===norm(ref)));\n  const one=(list,label)=>{if(list.length!==1)throw Error(list.length?'Plusieurs '+label+' correspondent : précisez l’identifiant.':label+' introuvable dans cet espace.');return list[0];};\n  const getDossier=id=>one(dossiers.filter(d=>d.dossierId===id),'Dossier');\n  const getQuote=()=>{if(p.token)return one(quotes.filter(q=>q.token===p.token),'Devis');let found=lookup(quotes,p.ref||p.quoteId||p.dossierId,['quoteId','numero','dossierId','clientName']);if(!found.length&&p.ref){const ds=dossiers.filter(d=>[d.nom_client,d.prenom_client,d.clientName,d.dossierId].some(v=>norm(v)===norm(p.ref)));found=quotes.filter(q=>ds.some(d=>d.dossierId===q.dossierId));}if(p.version)found=found.filter(q=>q.version===Number(p.version));else if(!quotes.some(q=>norm(q.numero)===norm(p.ref)))found=found.filter(q=>headQuotes().some(h=>h.token===q.token));return one(found,'Devis');};\n  const isWrite=['settings.save','catalog.save','catalog.delete','dossier.save','quote.create','quote.revise'].includes(command);\n  if(isWrite){if(!UUID.test(req.requestId))throw Error('requestId UUID obligatoire.');const prior=events.find(e=>e.requestId===req.requestId);if(prior){if(prior.request!==JSON.stringify({command,params:p}))throw Error('requestId déjà utilisé pour une autre opération.');if(prior.kind!==command.split('.')[0])throw Error('requestId déjà utilisé.');return out({replayed:true,[prior.kind==='quote'?'quote':prior.kind==='settings'?'settings':prior.kind==='dossier'?'dossier':'item']:prior.kind==='quote'?decorate(prior.data):prior.data});}}\n  if(command==='settings.get')return out({settings});\n  if(command==='settings.save'){\n    if(p.revision!==settings.revision)throw Error('Paramètres modifiés entre-temps. Actualisez avant de réessayer.');\n    const next={revision:settings.revision+1};\n    for(const k of ['companyName','companyDetails','intro','comments','footer'])next[k]=clean(p[k]??'',k==='companyName'?160:3000);\n    for(const k of ['primaryColor','accentColor']){if(!/^#[0-9a-f]{6}$/i.test(p[k]||''))throw Error('Couleur hexadécimale invalide.');next[k]=p[k];}\n    const logo=p.logo??'';if(typeof logo!=='string'||logo.length>350000)throw Error('Logo trop volumineux (250 Ko maximum).');\n    if(logo){const m=logo.match(/^data:image\\/(png|jpeg);base64,([A-Za-z0-9+/]+={0,2})$/);if(!m)throw Error('Logo PNG ou JPEG requis.');const b=Buffer.from(m[2],'base64');if(b.length>256000||!(m[1]==='png'?b.subarray(0,8).toString('hex')==='89504e470d0a1a0a':b[0]===255&&b[1]===216&&b[2]===255))throw Error('Fichier logo invalide.');}\n    const textFields=['street','addressExtra','postalCode','city','legalForm','siren','siret','rcsCity','vatNumber','companyEmail','companyPhone','paymentTerms','executionTerms','insuranceInfo','sapNumber','mediator'];\n    for(const k of textFields)next[k]=clean(p[k]??'',k.endsWith('Terms')||k==='insuranceInfo'||k==='mediator'?1500:160);\n    next.country='France';next.companyDetails='';\n    if(!next.companyName||!next.street||!next.city||!/^\\d{5}$/.test(next.postalCode))throw Error('Nom, adresse, code postal français à cinq chiffres et ville requis.');\n    if(!['EI','SAS','SASU','SARL','EURL','SA','SNC','Association','Autre'].includes(next.legalForm))throw Error('Forme juridique requise.');\n    const luhn=s=>[...s].reverse().reduce((a,c,i)=>{let v=Number(c)*(i%2?2:1);return a+(v>9?v-9:v)},0)%10===0;\n    if(!/^\\d{9}$/.test(next.siren)||/^0{9}$/.test(next.siren)||!luhn(next.siren))throw Error('SIREN invalide : neuf chiffres et clé de contrôle requis.');\n    if(next.siret&&(!/^\\d{14}$/.test(next.siret)||!next.siret.startsWith(next.siren)||!luhn(next.siret)))throw Error('SIRET invalide ou différent du SIREN.');\n    const company=['SAS','SASU','SARL','EURL','SA','SNC'].includes(next.legalForm);\n    next.capital=company?num(p.capital,0,100000000000):'';\n    if(company&&!next.rcsCity)throw Error('Ville du RCS requise pour une société commerciale.');\n    if(!['standard','franchise'].includes(p.vatMode))throw Error('Choisissez le régime de TVA.');next.vatMode=p.vatMode;\n    if(next.vatMode==='standard'&&(!/^FR[A-Z0-9]{2}\\d{9}$/.test(next.vatNumber)||!next.vatNumber.endsWith(next.siren)))throw Error('Numéro de TVA français requis et cohérent avec le SIREN.');\n    if(next.companyEmail&&!/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(next.companyEmail))throw Error('E-mail de l’entreprise invalide.');\n    next.validityDays=num(p.validityDays,1,365,0);next.depositPercent=num(p.depositPercent??0,0,100);\n    if(!next.paymentTerms||!next.executionTerms)throw Error('Modalités de paiement et date ou délai d’exécution requis.');\n    next.logo=logo;return write('settings','company',next,{settings:next});\n  }\n  if(command==='catalog.list')return out({items:catalog.filter(x=>!x.deleted)});\n  if(command==='catalog.save'||command==='catalog.delete'){\n    const old=p.id?one(catalog.filter(c=>c.id===p.id&&!c.deleted),'Désignation'):null;\n    if(old&&p.revision!==old.revision)throw Error('Catalogue modifié entre-temps. Rechargez avant d’enregistrer.');\n    if(command==='catalog.delete'){\n      if(quotes.some(q=>q.lines.some(l=>l.catalogId===old.id)))throw Error('Désignation utilisée : désactivez-la pour conserver son historique.');\n      const item={...old,deleted:true,active:false,revision:old.revision+1};return write('catalog',item.id,item,{item});\n    }\n    const label=clean(p.label,160),description=clean(p.description??'',1000),unit=clean(p.unit,30);\n    if(!label||!unit)throw Error('Libellé et unité requis.');\n    const item={id:old?.id||'CAT-'+token,label,description,unit,price:num(p.price,0,1000000),vat:num(p.vat,0,100),active:p.active!==false,revision:(old?.revision||0)+1,deleted:false};\n    return write('catalog',item.id,item,{item});\n  }\n  if(command==='dossier.list')return out({dossiers});\n  if(command==='dossier.search'){\n    const result=lookup(dossiers,clean(p.ref||'',160),['dossierId','nom_client','prenom_client','clientName']);\n    return out({status:result.length===1?'trouve':result.length?'ambigu':'introuvable',dossiers:result});\n  }\n  if(command==='dossier.save'){\n    const old=p.dossierId?getDossier(p.dossierId):null;\n    if(old&&p.revision!==old.revision)throw Error('Dossier modifié entre-temps. Recherchez-le à nouveau.');\n    const fields=['nom_client','prenom_client','prestation','surface','adresse_chantier','adresse_facturation','frequence','notes'];\n    const dossier={...(old||{}),dossierId:old?.dossierId||'DOS-'+token,sessionId:old?.sessionId||req.sessionId,revision:(old?.revision||0)+1,updatedAt:now};\n    const changes=p.fields;if(!changes||typeof changes!=='object'||Array.isArray(changes))throw Error('Champs de dossier requis.');\n    for(const key of Object.keys(changes))if(!fields.includes(key))throw Error('Champ de dossier inconnu : '+key);\n    for(const key of fields)dossier[key]=Object.hasOwn(changes,key)?clean(changes[key],key==='notes'?2000:1000):String(old?.[key]||'');\n    dossier.clientName=[dossier.prenom_client,dossier.nom_client].filter(Boolean).join(' ');\n    if(!dossier.clientName||!dossier.prestation)throw Error('Client identifiable et prestation requis ; les autres champs sont facultatifs.');\n    if(!old&&dossiers.some(d=>norm(d.clientName)===norm(dossier.clientName)&&norm(d.prestation)===norm(dossier.prestation))&&!p.confirmNew)throw Error('Demande similaire existante. Recherchez le dossier ou confirmez une nouvelle demande distincte.');\n    return write('dossier',dossier.dossierId,dossier,{dossier});\n  }\n  if(command==='quote.list')return out({quotes:(p.history?quotes:headQuotes()).map(decorate).reverse()});\n  if(command==='quote.find') {const quote=decorate(getQuote());return out({quote});}\n  if(command==='quote.create'||command==='quote.revise'){\n    const old=command==='quote.revise'?getQuote():null;\n    if(old&&(!decorate(old).current||decorate(old).conflict)){const heads=current(old);return {result:{ok:false,error:'Version ancienne ou ambiguë. Relire quote.find avec le quoteId sans suffixe de version avant correction.',quoteId:old.quoteId,currentQuote:heads.length===1?decorate(heads[0]):null},write:false,pdf:false};}\n    const client=getDossier(old?.dossierId||p.dossierId);\n    if(old&&(old.presentation?.vatMode||'standard')!==(settings.vatMode||'standard'))throw Error('Le régime de TVA a changé : créez un nouveau devis pour recalculer toutes ses lignes.');\n    let lines;\n    const makeLine=(l,index)=>{\n      const c=one(catalog.filter(c=>c.id===l.catalogId&&!c.deleted&&c.active),'Désignation active');\n      const quantity=num(l.quantity,0.001,1000000,3),price=c.price,vat=settings.vatMode==='franchise'?0:c.vat;\n      const ht=Math.round(Math.round(quantity*1000)*Math.round(price*100)/1000),tax=Math.round(ht*Math.round(vat*100)/10000);\n      if(ht>100000000000)throw Error('Montant de ligne trop élevé.');\n      return {lineId:token+'-'+index,catalogId:c.id,catalogRevision:c.revision,label:c.label,description:c.description,unit:c.unit,quantity,price,vat,htCents:ht,vatCents:tax};\n    };\n    if(old){\n      lines=old.lines.map(l=>({...l}));\n      if(p.quantities){for(const change of p.quantities){const l=one(lines.filter(l=>l.lineId===change.lineId),'Ligne');l.quantity=num(change.quantity,0.001,1000000,3);l.htCents=Math.round(Math.round(l.quantity*1000)*Math.round(l.price*100)/1000);l.vatCents=Math.round(l.htCents*Math.round(l.vat*100)/10000);}}\n      if(p.removeLineIds){if(!Array.isArray(p.removeLineIds))throw Error('Liste de lignes invalide.');for(const id of p.removeLineIds)one(lines.filter(l=>l.lineId===id),'Ligne');lines=lines.filter(l=>!p.removeLineIds.includes(l.lineId));}\n      if(p.addLines){if(!Array.isArray(p.addLines))throw Error('Lignes invalides.');lines.push(...p.addLines.map(makeLine));}\n    }else{if(!Array.isArray(p.lines))throw Error('Sélectionnez les désignations et quantités.');lines=p.lines.map(makeLine);}\n    if(!lines.length||lines.length>50)throw Error('Le devis doit comporter entre 1 et 50 lignes chiffrées.');\n    const htCents=lines.reduce((s,l)=>s+l.htCents,0),vatCents=lines.reduce((s,l)=>s+l.vatCents,0);\n    const quoteId=old?.quoteId||'DEV-'+now.slice(0,10).replace(/-/g,'')+'-'+token.replace(/-/g,'').slice(0,12).toUpperCase();\n    const version=(old?.version||0)+1;\n    const quote={missingInformation:legalWarnings(settings,client),validUntil:new Date(new Date(now).getTime()+(settings.validityDays||30)*86400000).toISOString(),presentation:JSON.parse(JSON.stringify(settings)),quoteId,numero:quoteId+'-V'+version,token,version,parentToken:old?.token||null,dossierId:client.dossierId,clientName:client.clientName,client:{...client},sessionId:req.sessionId,createdAt:now,lines,htCents,vatCents,ttcCents:htCents+vatCents,status:'brouillon',reason:clean(p.reason||'Création',500)};\n    return write('quote',quoteId,quote,{quote:{...quote,current:true,conflict:false,stale:false}},true);\n  }\n  throw Error('Commande inconnue.');\n}\ntry {const req=$('Espace privé').first().json;req.requestId=req.requestId||$('Jeton version').first().json.token;return [{json:service(req,$input.all().map(i=>i.json),$('Jeton version').first().json.token)}];} catch(e){return [{json:{result:{ok:false,error:e.message},write:false,pdf:false}}];}"
       }
     },
     {
@@ -143,7 +143,7 @@
       ],
       "parameters": {
         "mode": "runOnceForAllItems",
-        "jsCode": "function render(q){\n const e=v=>String(v??'').replace(/[&<>\"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',\"'\":'&#39;'}[c]));\n const text=v=>e(v).replace(/\\n/g,'<br>');\n const p=q.presentation||{},color=/^#[0-9a-f]{6}$/i.test(p.primaryColor||'')?p.primaryColor:'#3E7CE0',accent=/^#[0-9a-f]{6}$/i.test(p.accentColor||'')?p.accentColor:'#E9F0FA';\n const rgb=color.slice(1).match(/../g).map(x=>parseInt(x,16)),ink=rgb[0]*.299+rgb[1]*.587+rgb[2]*.114>150?'#152238':'#ffffff';\n const money=n=>(n/100).toLocaleString('fr-FR',{style:'currency',currency:'EUR'});\n const logo=/^data:image\\/(png|jpeg);base64,[A-Za-z0-9+/]+={0,2}$/.test(p.logo||'')?'<img class=\"logo\" alt=\"Logo\" src=\"'+p.logo+'\">':'';\n return `<!doctype html><html lang=\"fr\"><meta charset=\"utf-8\"><title>${e(q.numero)}</title><style>@page{size:A4;margin:16mm}body{font:12px/1.6 Arial;color:#19243a}header{display:flex;justify-content:space-between;border-bottom:3px solid ${color};padding-bottom:18px;gap:20px}.logo{max-width:180px;max-height:90px;object-fit:contain;display:block;margin-bottom:10px}h1{font-size:26px;color:${color}}h2{font-size:15px}.badge{background:#fff0d6;padding:6px}section{display:flex;gap:25px;margin:22px 0}section>div{flex:1;background:${accent};padding:14px}table{border-collapse:collapse;width:100%;font-size:10px}th,td{border-bottom:1px solid #d7e0eb;padding:8px;text-align:right}td:first-child,th:first-child{text-align:left;max-width:180px}thead{display:table-header-group}tr{break-inside:avoid}th{background:${color};color:${ink}}.totals{text-align:right;font-size:15px;margin:24px 0}footer{border-top:1px solid ${color};margin-top:25px;padding-top:12px;font-size:10px}p{overflow-wrap:anywhere}small{color:#64748b}</style><header><div>${logo}<strong>${e(p.companyName||'Cognalys Intelligence')}</strong><p>${text(p.companyDetails||'Entreprise de nettoyage · Démonstration')}</p></div><div><span class=\"badge\">BROUILLON · VERSION ${q.version}</span><br>${e(q.numero)}<br>${e(new Date(q.createdAt).toLocaleDateString('fr-FR',{timeZone:'Europe/Paris'}))}</div></header><h1>Devis de nettoyage</h1>${p.intro?'<p>'+text(p.intro)+'</p>':''}<section><div><h2>Destinataire</h2><strong>${e(q.clientName)}</strong><p>${text(q.client.adresse_facturation||'Adresse de facturation à compléter')}</p></div><div><h2>Lieu d’intervention</h2><p>${text(q.client.adresse_chantier||'Adresse du chantier à compléter')}</p><small>Fréquence : ${e(q.client.frequence||'À préciser')}</small></div></section><table><thead><tr><th>Désignation</th><th>Qté</th><th>Unité</th><th>PU HT</th><th>HT</th><th>TVA</th><th>TTC</th></tr></thead><tbody>${q.lines.map(l=>`<tr><td><strong>${e(l.label)}</strong><br>${text(l.description)}</td><td>${l.quantity}</td><td>${e(l.unit)}</td><td>${money(Math.round(l.price*100))}</td><td>${money(l.htCents)}</td><td>${l.vat}%<br>${money(l.vatCents)}</td><td>${money(l.htCents+l.vatCents)}</td></tr>`).join('')}</tbody></table><div class=\"totals\">Total HT : <strong>${money(q.htCents)}</strong><br>TVA : <strong>${money(q.vatCents)}</strong><br>Total TTC : <strong>${money(q.ttcCents)}</strong></div>${p.comments?'<p>'+text(p.comments)+'</p>':''}<footer>${text(p.footer||'Document de démonstration. Identité légale et conditions à compléter avant usage commercial.')}<br>Version figée, non signée et non envoyée.</footer></html>`;\n}\nconst s=$('Service métier').first().json;return [{json:{html:render(s.result.quote)}}];"
+        "jsCode": "function render(q){\n const e=v=>String(v??'').replace(/[&<>\"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',\"'\":'&#39;'}[c]));\n const text=v=>e(v).replace(/\\n/g,'<br>');\n const p=q.presentation||{},color=/^#[0-9a-f]{6}$/i.test(p.primaryColor||'')?p.primaryColor:'#3E7CE0',accent=/^#[0-9a-f]{6}$/i.test(p.accentColor||'')?p.accentColor:'#E9F0FA';\n const rgb=color.slice(1).match(/../g).map(x=>parseInt(x,16)),ink=rgb[0]*.299+rgb[1]*.587+rgb[2]*.114>150?'#152238':'#ffffff';\n const companyAddress=[p.street,p.addressExtra,[p.postalCode,p.city].filter(Boolean).join(' '),p.country].filter(Boolean).join('\\n');\n const legal=[p.legalForm,p.capital!==''&&p.capital!=null?'Capital : '+p.capital+' €':'',p.siren?'SIREN : '+p.siren:'',p.siret?'SIRET : '+p.siret:'',p.rcsCity?'RCS '+p.rcsCity:'',p.vatMode==='franchise'?'TVA non applicable, art. 293 B du CGI.':p.vatNumber?'TVA : '+p.vatNumber:'',p.companyEmail,p.companyPhone,p.sapNumber?'Déclaration SAP : '+p.sapNumber:''].filter(Boolean).join(' · ');\n const money=n=>(n/100).toLocaleString('fr-FR',{style:'currency',currency:'EUR'});\n const logo=/^data:image\\/(png|jpeg);base64,[A-Za-z0-9+/]+={0,2}$/.test(p.logo||'')?'<img class=\"logo\" alt=\"Logo\" src=\"'+p.logo+'\">':'';\n return `<!doctype html><html lang=\"fr\"><meta charset=\"utf-8\"><title>${e(q.numero)}</title><style>@page{size:A4;margin:16mm}body{font:12px/1.6 Arial;color:#19243a}header{display:flex;justify-content:space-between;border-bottom:3px solid ${color};padding-bottom:18px;gap:20px}.logo{max-width:180px;max-height:90px;object-fit:contain;display:block;margin-bottom:10px}h1{font-size:26px;color:${color}}h2{font-size:15px}.badge{background:#fff0d6;padding:6px}section{display:flex;gap:25px;margin:22px 0}section>div{flex:1;background:${accent};padding:14px}table{border-collapse:collapse;width:100%;font-size:10px}th,td{border-bottom:1px solid #d7e0eb;padding:8px;text-align:right}td:first-child,th:first-child{text-align:left;max-width:180px}thead{display:table-header-group}tr{break-inside:avoid}th{background:${color};color:${ink}}.totals{text-align:right;font-size:15px;margin:24px 0}footer{border-top:1px solid ${color};margin-top:25px;padding-top:12px;font-size:10px}p{overflow-wrap:anywhere}small{color:#64748b}</style><header><div>${logo}<strong>${e(p.companyName||'Cognalys Intelligence')}</strong><p>${text(companyAddress||p.companyDetails||'Adresse entreprise à compléter')+'</p><small>'+e(legal)+'</small><p>'}</p></div><div><span class=\"badge\">BROUILLON · VERSION ${q.version}</span><br>${e(q.numero)}<br>${e(new Date(q.createdAt).toLocaleDateString('fr-FR',{timeZone:'Europe/Paris'}))}</div></header><h1>Devis de nettoyage</h1><p>Devis gratuit · Offre valable jusqu’au ${e(new Date(q.validUntil||new Date(new Date(q.createdAt).getTime()+30*86400000)).toLocaleDateString('fr-FR',{timeZone:'Europe/Paris'}))}</p>${q.missingInformation?.length?'<p class=\"badge\">À compléter : '+e(q.missingInformation.join(', '))+'</p>':''}${p.intro?'<p>'+text(p.intro)+'</p>':''}<section><div><h2>Destinataire</h2><strong>${e(q.clientName)}</strong><p>${text(q.client.adresse_facturation||'Adresse de facturation à compléter')}</p></div><div><h2>Lieu d’intervention</h2><p>${text(q.client.adresse_chantier||'Adresse du chantier à compléter')}</p><small>Fréquence : ${e(q.client.frequence||'À préciser')}</small></div></section><table><thead><tr><th>Désignation</th><th>Qté</th><th>Unité</th><th>PU HT</th><th>HT</th><th>TVA</th><th>TTC</th></tr></thead><tbody>${q.lines.map(l=>`<tr><td><strong>${e(l.label)}</strong><br>${text(l.description)}</td><td>${l.quantity}</td><td>${e(l.unit)}</td><td>${money(Math.round(l.price*100))}</td><td>${money(l.htCents)}</td><td>${l.vat}%<br>${money(l.vatCents)}</td><td>${money(l.htCents+l.vatCents)}</td></tr>`).join('')}</tbody></table><div class=\"totals\">Total HT : <strong>${money(q.htCents)}</strong><br>TVA : <strong>${money(q.vatCents)}</strong><br>Total TTC : <strong>${money(q.ttcCents)}</strong></div><p><strong>Exécution :</strong> ${text(p.executionTerms||'Date ou délai à préciser')}<br><strong>Paiement :</strong> ${text(p.paymentTerms||'Modalités à préciser')}${p.depositPercent?'<br>Acompte : '+p.depositPercent+' % ('+money(Math.round(q.ttcCents*p.depositPercent/100))+')':''}</p>${p.insuranceInfo?'<p>Assurance : '+text(p.insuranceInfo)+'</p>':''}${p.mediator?'<p>Médiation de la consommation : '+text(p.mediator)+'</p>':''}<p>Bon pour accord — Date : __________________ Signature du client : __________________</p>${p.comments?'<p>'+text(p.comments)+'</p>':''}<footer>${text(p.footer||'Document de démonstration. Identité légale et conditions à compléter avant usage commercial.')}<br>Version figée, non signée et non envoyée.</footer></html>`;\n}\nconst s=$('Service métier').first().json;return [{json:{html:render(s.result.quote)}}];"
       }
     },
     {
@@ -493,6 +493,272 @@
           }
         }
       }
+    },
+    {
+      "id": "273e3a45-e452-4728-a296-0f1d8a8c7a50",
+      "name": "Administration ?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        800,
+        -450
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.command.startsWith('admin.') }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      }
+    },
+    {
+      "id": "6348d2ca-0e0e-49a7-921d-5cf0529aa830",
+      "name": "Propriétaire uniquement ?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        950,
+        -450
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $('Contrôler connexion').first().json.uid === 'TJFfqZBnzyfgpZRNmKGDwWnUltP2' && $('API demo privée').isExecuted }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      }
+    },
+    {
+      "id": "dec10ddf-8908-47d1-ad4d-873ef03a2324",
+      "name": "Refuser administration",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        1100,
+        -450
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "{\"ok\":false,\"error\":\"Administration réservée au propriétaire.\"}",
+        "options": {
+          "responseCode": 403
+        }
+      }
+    },
+    {
+      "id": "a63bc358-4b73-4c58-9cee-7963345766bc",
+      "name": "Lire inscriptions",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        1250,
+        -450
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "rGN4lPFNidKYXSDq",
+          "cachedResultName": "cognalys_memberships"
+        },
+        "returnAll": true
+      }
+    },
+    {
+      "id": "efd2242a-ac58-4ac0-9745-42e1573675af",
+      "name": "Nouvel espace aléatoire",
+      "type": "n8n-nodes-base.crypto",
+      "typeVersion": 1,
+      "position": [
+        1400,
+        -450
+      ],
+      "parameters": {
+        "action": "generate",
+        "encodingType": "hex",
+        "stringLength": 32,
+        "dataPropertyName": "newScope"
+      }
+    },
+    {
+      "id": "01e6d93a-6726-4db3-aa52-aec7aa23b276",
+      "name": "Préparer action admin",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1550,
+        -450
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "function adminService(actor,req,rows,newScope){\n const OWNER='TJFfqZBnzyfgpZRNmKGDwWnUltP2';\n const fail=error=>({write:false,result:{ok:false,error}});\n if(actor.uid!==OWNER||!actor.authorized||!req.web)return fail('Administration réservée au propriétaire.');\n const members=rows.filter(r=>r.uid);\n const clean=r=>({uid:r.uid,email:r.email||'',company:r.company||'',active:r.active===true,status:r.status||(r.active?'approved':r.scope?'suspended':'pending'),updatedAt:r.updatedAt,createdAt:r.createdAt});\n if(req.command==='admin.list')return {write:false,result:{ok:true,members:members.map(clean).sort((a,b)=>String(a.createdAt).localeCompare(String(b.createdAt)))}};\n const p=req.params||{};\n if(p.uid===OWNER)return fail('Le compte propriétaire ne peut pas être désactivé ici.');\n const found=members.filter(r=>r.uid===p.uid);if(found.length!==1)return fail('Compte absent ou en doublon. Actualisez la liste.');\n const old=found[0];if(p.updatedAt!==old.updatedAt)return fail('Ce compte a changé. Actualisez avant de réessayer.');\n let status,active,scope=old.scope||'',company=old.company||'';\n if(req.command==='admin.approve'||req.command==='admin.reactivate'){company=String(p.company||company).trim();if(!company||company.length>160)return fail('Un nom d’entreprise est requis (160 caractères maximum).');if(!scope){if(!/^[a-f0-9]{64}$/.test(newScope))return fail('Impossible de créer l’espace.');scope=newScope;}status='approved';active=true;}\n else if(req.command==='admin.suspend'){status='suspended';active=false;}\n else if(req.command==='admin.reject'){status='rejected';active=false;}\n else return fail('Action administrative inconnue.');\n return {write:true,rowId:old.id,uid:old.uid,email:old.email||'',scope,company,status,active,result:{ok:true,member:{...clean(old),status,active,company}}};\n}\n\nconst req=$('Valider identifiants').first().json;return [{json:adminService($('Contrôler connexion').first().json,{...req,web:$('API demo privée').isExecuted},$('Lire inscriptions').all().map(i=>i.json),$input.first().json.newScope)}];"
+      }
+    },
+    {
+      "id": "d5c5c6f7-aeea-44be-a495-2509deb83b85",
+      "name": "Modifier accès ?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1700,
+        -450
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.write === true }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      }
+    },
+    {
+      "id": "6aa363e4-3860-4ba3-b1e8-c91176f8e2c5",
+      "name": "Enregistrer accès",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        1850,
+        -450
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "update",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "rGN4lPFNidKYXSDq",
+          "cachedResultName": "cognalys_memberships"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "id",
+              "condition": "eq",
+              "keyValue": "={{ $json.rowId }}"
+            }
+          ]
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "schema": [
+            {
+              "id": "uid",
+              "displayName": "uid",
+              "type": "string",
+              "display": true,
+              "required": false
+            },
+            {
+              "id": "email",
+              "displayName": "email",
+              "type": "string",
+              "display": true,
+              "required": false
+            },
+            {
+              "id": "scope",
+              "displayName": "scope",
+              "type": "string",
+              "display": true,
+              "required": false
+            },
+            {
+              "id": "company",
+              "displayName": "company",
+              "type": "string",
+              "display": true,
+              "required": false
+            },
+            {
+              "id": "active",
+              "displayName": "active",
+              "type": "boolean",
+              "display": true,
+              "required": false
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "type": "string",
+              "display": true,
+              "required": false
+            }
+          ],
+          "value": {
+            "uid": "={{ $json.uid }}",
+            "email": "={{ $json.email }}",
+            "scope": "={{ $json.scope }}",
+            "company": "={{ $json.company }}",
+            "active": "={{ $json.active }}",
+            "status": "={{ $json.status }}"
+          }
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "ef3ffb58-6b18-4a13-a0d8-23d7fde1eda4",
+      "name": "Accès confirmé",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2000,
+        -450
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const p=$('Préparer action admin').first().json;const row=$input.first().json;if(row.uid!==p.uid||row.active!==p.active||row.status!==p.status)return [{json:{ok:false,error:'Modification non confirmée. Actualisez.'}}];return [{json:p.result}];"
+      }
+    },
+    {
+      "id": "b46ad989-bca9-48af-96ca-059e67152e43",
+      "name": "Liste admin",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2150,
+        -450
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "return [{json:$('Préparer action admin').first().json.result}];"
+      }
     }
   ],
   "connections": {
@@ -682,17 +948,6 @@
         ]
       ]
     },
-    "Valider identifiants": {
-      "main": [
-        [
-          {
-            "node": "Espace privé",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
     "Espace privé": {
       "main": [
         [
@@ -705,6 +960,137 @@
       ]
     },
     "Résultat serveur": {
+      "main": [
+        [
+          {
+            "node": "Répondre résultat",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Valider identifiants": {
+      "main": [
+        [
+          {
+            "node": "Administration ?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Administration ?": {
+      "main": [
+        [
+          {
+            "node": "Propriétaire uniquement ?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Espace privé",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Propriétaire uniquement ?": {
+      "main": [
+        [
+          {
+            "node": "Lire inscriptions",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Refuser administration",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Lire inscriptions": {
+      "main": [
+        [
+          {
+            "node": "Nouvel espace aléatoire",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Nouvel espace aléatoire": {
+      "main": [
+        [
+          {
+            "node": "Préparer action admin",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Préparer action admin": {
+      "main": [
+        [
+          {
+            "node": "Modifier accès ?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Modifier accès ?": {
+      "main": [
+        [
+          {
+            "node": "Enregistrer accès",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Liste admin",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Enregistrer accès": {
+      "main": [
+        [
+          {
+            "node": "Accès confirmé",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Accès confirmé": {
+      "main": [
+        [
+          {
+            "node": "Répondre résultat",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Liste admin": {
       "main": [
         [
           {
