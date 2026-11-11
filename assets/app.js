@@ -43,6 +43,13 @@
  function toast(text){const el=document.querySelector('#toast');el.textContent=text;el.classList.add('visible');clearTimeout(toastClock);toastClock=setTimeout(()=>el.classList.remove('visible'),4000);}
  function render(focus=false){
   const account=CognalysAuth.state;const adminNav=document.querySelector('#admin-nav');if(adminNav){adminNav.hidden=!account.access?.isAdmin;adminNav.style.display=account.access?.isAdmin?'':'none';}
+  // Presentation state for the responsive navigation; routes and permissions stay unchanged.
+  const route=location.hash.slice(1)||'accueil';
+  const navRoute=({dossiers:'formulaire',verification:'formulaire',devis:'devis-pdf',espace:'parametres'})[route]||route;
+  document.querySelectorAll('.top nav a').forEach(link=>{
+   if(link.hash==='#'+navRoute)link.setAttribute('aria-current','page');
+   else link.removeAttribute('aria-current');
+  });
   if(!account.ready||!account.user||!account.access?.authorized){main.innerHTML=Views.login(account,s);document.title='Connexion · Cognalys Intelligence';return;}
   const hash=location.hash.slice(1)||'accueil';page=hash==='verification'?'formulaire':hash;
   if(page!=='conversation')cancelCapture();
@@ -233,5 +240,6 @@
  });
  render();
 })();
+
 
 
