@@ -13,9 +13,13 @@ Application statique HTML/CSS/JavaScript. Le chat, le formulaire dossiers, le ca
 
 ## Espace privé, conversations et données personnelles
 
-Au premier chargement, le navigateur crée une clé aléatoire de 256 bits conservée dans `localStorage`. Le menu **Espace privé** permet de la sauvegarder puis de la saisir sur un autre navigateur. Sa possession autorise l’accès à cet espace. Elle n’est jamais mise dans les URL, incluse dans le prompt ni publiée dans le dépôt. Elle est transmise en HTTPS aux webhooks ; son empreinte SHA-256 sert à filtrer la table. Les données d’exécution des nouveaux workflows ne sont pas conservées.
+La connexion utilise Firebase Authentication, projet `cognalys-intelligence-devis`, avec e-mail et mot de passe. Aucun Analytics n’est initialisé. Les comptes peuvent s’inscrire mais restent en attente tant qu’un administrateur n’a pas ajouté une appartenance active dans `cognalys_memberships`. Le mot de passe n’est envoyé qu’à Firebase ; n8n reçoit un jeton Firebase, jamais le mot de passe.
 
-Ce mécanisme de capacité privée convient uniquement à une démonstration avec données fictives. Il ne fournit ni comptes nominatifs, révocation, rôles, journal d’audit utilisateur, protection contre un script malveillant de la même origine, ni limitation des appels publics. Une clé perdue n’est pas récupérable par l’interface. Une clé partagée donne les mêmes droits au détenteur. Des comptes utilisateurs et des contrôles serveur adaptés sont nécessaires avant l’utilisation de données clients réelles.
+Chaque point d’entrée (API, chat, PDF et audio) appelle `COGNALYS V2 - Accès Firebase`. Google vérifie le jeton via accounts:lookup ; le workflow contrôle aussi le projet, le sujet, les dates, la désactivation et la révocation, puis recherche l’UID dans la table d’appartenance. L’espace métier vient uniquement de cette table côté serveur. Une clé privée de démonstration, un scope ou un UID transmis par le navigateur ne donnent aucun accès.
+
+Table `cognalys_memberships` (`rGN4lPFNidKYXSDq`) : `uid`, `email`, `scope` (64 caractères hexadécimaux), `company`, `active`. Pour activer un compte, vérifier son UID dans Firebase, choisir un scope aléatoire inédit pour une nouvelle entreprise puis insérer une unique ligne active. Pour plusieurs membres de la même entreprise, réutiliser son scope. Pour suspendre, mettre active à false : le prochain appel est refusé. Des lignes multiples pour le même UID sont refusées. L’activation reste administrative dans n8n, sans interface publique d’administration et sans facturation automatique.
+
+Les anciens espaces et PDF sont conservés. Leur clé locale n’est plus acceptée pour se connecter. Un administrateur peut associer leur empreinte SHA-256 au compte du propriétaire après vérification de possession, sans déplacer ni réécrire les devis. Aucun rattachement automatique au premier compte inscrit.
 
 Le `sessionId` est un UUID de conversation conservé en `sessionStorage` (avec repli historique si le stockage est refusé). **Nouvelle conversation** génère un autre UUID sans changer l’espace. La mémoire du modèle est limitée à cinq interactions et indexée par empreinte d’espace + conversation. Les données métier sont relues depuis la table. L’historique visuel du chat n’est pas restauré au rechargement.
 
@@ -32,9 +36,9 @@ Base : `https://n8n.cognalys-intelligence.fr/webhook/cognalys/v2/`.
 
 | POST | Entrée | Sortie |
 | --- | --- | --- |
-| `api` | `workspaceKey`, `sessionId`, `command`, `params`, `requestId` facultatif | `ok:true` et données confirmées, ou `ok:false,error` pour les refus métier |
-| `chat` | `workspaceKey`, `sessionId`, `chatInput` | `output`, document confirmé éventuel |
-| `pdf` | `workspaceKey`, `sessionId`, `params:{token}` | fichier PDF existant ; 404 pour un jeton absent de cet espace |
+| `api` | `idToken`, `sessionId`, `command`, `params`, `requestId` facultatif | `ok:true` et données confirmées, ou `ok:false,error` pour les refus métier |
+| `chat` | `idToken`, `sessionId`, `chatInput` | `output`, document confirmé éventuel |
+| `pdf` | `idToken`, `sessionId`, `params:{token}` | fichier PDF existant ; 404 pour un jeton absent de cet espace |
 
 Commandes : `catalog.list/save/delete`, `dossier.list/search/save`, `quote.list/find/create/revise`. `requestId` permet la répétition séquentielle d’une même mutation sans duplication ; sa réutilisation avec un contenu différent est refusée. En cas de délai dépassé, le résultat est incertain : relire les données avant de réessayer. Aucun succès n’est affiché avant confirmation du serveur.
 
@@ -47,6 +51,7 @@ Workflows publiés dans le projet personnel n8n existant :
 - `DkVsfDUoyZIjCDyh` — COGNALYS V2 - API métier privée ;
 - `fG204l6OTpk0Lste` — COGNALYS V2 - Assistant devis privé ;
 - `HpwGF5OGfm4j6oCJ` — COGNALYS V2 - Consultation PDF privée ;
+- `u3VnqXbcfWf0Ea2d` — COGNALYS V2 - Accès Firebase ;
 - `uytilDGsbu5B8aYS` — COGNALYS V2 - Transcription audio : microphone indépendant de la V1, même OpenRouter Whisper.
 
 Les sept workflows V1 sont hors ligne : principal, enregistrement, recherche, génération PDF, liste PDF, consultation PDF et décision email. Ils sont conservés pour permettre une réactivation manuelle.
@@ -57,7 +62,7 @@ Les exports dans `n8n/` décrivent la configuration déployée. Le workflow audi
 
 `node --test tests/service.test.cjs` vérifie les identifiants, les mises à jour partielles, les révisions obsolètes, les nombres, l’isolation et la répétition des requêtes. Les tests réels ont vérifié deux clients, catalogue créé puis modifié, dossier incomplet complété, devis chiffré, versions V1/V2/V3, recherche exacte par chat, nouvelle conversation, absence d’accès dans un autre espace et vrais fichiers PDF distincts.
 
-L’aperçu utilise PDF.js 6.5.438, livré localement dans `assets/vendor/` avec sa licence Apache 2.0 ; aucun CDN n’exécute du code dans l’espace privé. Le téléchargement utilise le même fichier PDF que l’aperçu. La transcription utilise désormais POST `cognalys/v2/audio` (multipart `audio` et `sessionId`). Elle renvoie `ok:true`, `sessionId` et `transcription` ; les erreurs sont explicites. WebM et M4A ont été vérifiés avec des fichiers de parole réels. La sélection du format du microphone suit les capacités du navigateur. Une capture physique dépend toujours de son autorisation.
+L’aperçu utilise PDF.js 6.5.438, livré localement dans `assets/vendor/` avec sa licence Apache 2.0 ; le SDK officiel Firebase Authentication est chargé depuis gstatic ; aucun SDK Analytics n’est chargé. Le téléchargement utilise le même fichier PDF que l’aperçu. La transcription utilise désormais POST `cognalys/v2/audio` (multipart `audio`, `sessionId` et `idToken`). Elle renvoie `ok:true`, `sessionId` et `transcription` ; les erreurs sont explicites. WebM et M4A ont été vérifiés avec des fichiers de parole réels. La sélection du format du microphone suit les capacités du navigateur. Une capture physique dépend toujours de son autorisation.
 
 Limites assumées : usage de démonstration séquentiel. Les tables n8n ne fournissent pas de transaction métier ni de verrou distribué ; des écritures strictement simultanées dans plusieurs onglets peuvent créer des conflits, malgré les révisions et l’idempotence séquentielle. La table est relue par espace et n’est pas dimensionnée pour un gros historique. Les PDF sont des brouillons : identité légale du prestataire et conditions restent à renseigner. Le catalogue utilise un taux numérique de TVA, sans gestion fiscale avancée. Les quantités et unités sont choisies explicitement, sans déduction automatique des passages depuis la fréquence.
 
@@ -69,3 +74,4 @@ Seul `SabreDoree/app.cognalys-intelligence` est concerné. GitHub Pages sert `ht
 ## Tests audio
 
 `node --test tests/audio.test.cjs` vérifie capture et arrêt des pistes, formats WebM/M4A, appel du webhook V2, transmission au chat, refus des sessions incohérentes, erreur serveur, relance sans duplication du texte et réponse tardive après changement de conversation. Ces tests simulent les API matérielles ; les tests HTTP utilisent des fichiers audio réels. Aucun quota OpenRouter ou mécanisme d’abonnement n’a été ajouté dans cette modification.
+

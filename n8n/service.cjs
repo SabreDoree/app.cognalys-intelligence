@@ -2,13 +2,13 @@
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 function normalize(raw) {
   const p=raw.body ?? raw;
-  if(!/^[0-9a-f]{64}$/.test(p.workspaceKey||'')) throw Error('Clé privée de démonstration absente ou invalide.');
+  if(typeof p.idToken!=='string'||!p.idToken) throw Error('Connexion requise.');
   if(!UUID.test(p.sessionId||'')) throw Error('sessionId doit être un UUID de conversation, jamais un dossierId.');
   let params=p.params??{};
   if(typeof params==='string') {try{params=JSON.parse(params);}catch{throw Error('Paramètres JSON invalides.');}}
   if(!params||Array.isArray(params)||typeof params!=='object') throw Error('Paramètres invalides.');
   if(JSON.stringify(params).length>40000) throw Error('Demande trop volumineuse.');
-  return {workspaceKey:p.workspaceKey,sessionId:p.sessionId,command:String(p.command||''),params,requestId:String(p.requestId||'')};
+  return {idToken:p.idToken,sessionId:p.sessionId,command:String(p.command||''),params,requestId:String(p.requestId||'')};
 }
 function service(req, rows, token, now=new Date().toISOString()) {
   const p=req.params, command=req.command;

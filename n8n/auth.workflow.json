@@ -1,0 +1,230 @@
+{
+  "id": "u3VnqXbcfWf0Ea2d",
+  "name": "COGNALYS V2 - Accès Firebase",
+  "nodes": [
+    {
+      "id": "50df7b32-4c03-4da3-90f7-53f1fdfe6041",
+      "name": "Vérifier compte",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "idToken"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "fb2072cf-a57e-41c7-9304-ef9887dd36e3",
+      "name": "Préparer identité",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        440,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const raw=$input.first().json;const p=raw.body??raw;let token=String(p.idToken||'');let claims={};try{claims=JSON.parse(Buffer.from(token.split('.')[1],'base64url').toString());}catch{}const now=Math.floor(Date.now()/1000);const expected='cognalys-intelligence-devis';const valid=token.length<10000&&claims.aud===expected&&claims.iss==='https://securetoken.google.com/'+expected&&typeof claims.sub==='string'&&claims.sub.length>0&&claims.exp>now&&claims.iat<=now+60;return [{json:{idToken:valid?token:'invalid',claims:valid?claims:{}}}];"
+      }
+    },
+    {
+      "id": "226f5273-04fd-4ec0-8a64-a7398c0585ec",
+      "name": "Firebase vérifie le jeton",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        660,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=AIzaSyAzb2y3-OK2di3BpTed5AZu9tX-a15Zt40",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {idToken:$json.idToken} }}",
+        "options": {
+          "timeout": 15000,
+          "response": {
+            "response": {
+              "responseFormat": "json",
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "fb03105b-7ba6-4979-9284-f5b61b4a5846",
+      "name": "Identité vérifiée",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const r=$input.first().json;const p=$('Préparer identité').first().json;const u=r.body?.users?.[0];const c=p.claims;const valid=r.statusCode===200&&u&&u.localId===c.sub&&!u.disabled&&(!u.validSince||Number(c.auth_time)>=Number(u.validSince));return [{json:valid?{authenticated:true,uid:u.localId,email:u.email||''}:{authenticated:false,uid:'__invalid',error:'Connexion absente, expirée ou refusée.'}}];"
+      }
+    },
+    {
+      "id": "753a4603-3fc9-4517-9da3-d0fd8a8b9195",
+      "name": "Appartenance entreprise",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        1100,
+        0
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "rGN4lPFNidKYXSDq",
+          "cachedResultName": "cognalys_memberships"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "uid",
+              "condition": "eq",
+              "keyValue": "={{ $json.uid }}"
+            }
+          ]
+        },
+        "returnAll": true
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "732bdff5-641a-4889-acca-319f0de4dcfc",
+      "name": "Accès entreprise",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1320,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const u=$('Identité vérifiée').first().json;if(!u.authenticated)return [{json:{ok:false,authenticated:false,authorized:false,statusCode:401,error:u.error}}];const rows=$input.all().map(i=>i.json).filter(r=>r.uid===u.uid);const m=rows.length===1?rows[0]:null;const authorized=!!(m?.active===true&&/^[a-f0-9]{64}$/.test(m.scope));return [{json:{ok:true,authenticated:true,authorized,uid:u.uid,email:u.email,company:authorized?m.company:'',scope:authorized?m.scope:'',statusCode:authorized?200:403,error:authorized?'':'Compte créé. Votre espace attend son activation par Cognalys.'}}];"
+      }
+    },
+    {
+      "id": "5fff82bd-85f9-4863-b733-913eca3bac26",
+      "name": "Compte web",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        220,
+        0
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "cognalys/v2/account",
+        "responseMode": "lastNode",
+        "options": {
+          "allowedOrigins": "https://app.cognalys-intelligence.fr,https://sabredoree.github.io",
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Cache-Control",
+                "value": "no-store"
+              }
+            ]
+          }
+        }
+      },
+      "webhookId": "17b60b91-a63d-4456-97cd-8e6ddd539cf0"
+    }
+  ],
+  "connections": {
+    "Vérifier compte": {
+      "main": [
+        [
+          {
+            "node": "Préparer identité",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Préparer identité": {
+      "main": [
+        [
+          {
+            "node": "Firebase vérifie le jeton",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Firebase vérifie le jeton": {
+      "main": [
+        [
+          {
+            "node": "Identité vérifiée",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Identité vérifiée": {
+      "main": [
+        [
+          {
+            "node": "Appartenance entreprise",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Appartenance entreprise": {
+      "main": [
+        [
+          {
+            "node": "Accès entreprise",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Compte web": {
+      "main": [
+        [
+          {
+            "node": "Préparer identité",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "availableInMCP": true,
+    "saveManualExecutions": false,
+    "saveDataErrorExecution": "none",
+    "saveDataSuccessExecution": "none",
+    "callerPolicy": "workflowsFromAList",
+    "callerIds": "DkVsfDUoyZIjCDyh,fG204l6OTpk0Lste,HpwGF5OGfm4j6oCJ,uytilDGsbu5B8aYS"
+  }
+}

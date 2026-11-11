@@ -42,15 +42,17 @@
  function go(hash){location.hash=hash;}
  function toast(text){const el=document.querySelector('#toast');el.textContent=text;el.classList.add('visible');clearTimeout(toastClock);toastClock=setTimeout(()=>el.classList.remove('visible'),4000);}
  function render(focus=false){
+  const account=CognalysAuth.state;
+  if(!account.ready||!account.user||!account.access?.authorized){main.innerHTML=Views.login(account,s);document.title='Connexion · Cognalys Intelligence';return;}
   const hash=location.hash.slice(1)||'accueil';page=hash==='verification'?'formulaire':hash;
   if(page!=='conversation')cancelCapture();
   const views={accueil:Views.home,conversation:Views.conversation,formulaire:Views.dossiers,dossiers:Views.dossiers,parametres:Views.settings,devis:Views.composer,'devis-pdf':x=>'<h1>Devis PDF</h1>'+Views.status(x)+'<section class="box">'+Views.pdfPanel(x)+'</section>',espace:Views.workspace};
   main.innerHTML=(views[page]||Views.home)(s);
   if(page==='conversation')main.insertAdjacentHTML('beforeend','<button class="reset" data-act="new-chat" '+(s.pending?'disabled':'')+'>Nouvelle conversation</button><section class="box">'+Views.pdfPanel(s)+'</section>');
-  if(!QuoteAPI.storageAvailable)main.insertAdjacentHTML('afterbegin','<p role="alert">Le navigateur refuse le stockage. Sauvegardez la clé dans Espace privé avant de fermer la page.</p>');
   document.title=(main.querySelector('h1')?.textContent||'Cognalys')+' · Cognalys Intelligence';if(focus){window.scrollTo(0,0);main.focus({preventScroll:true});}
  }
  async function reload(){
+  if(!CognalysAuth.state.access?.authorized)return;
   const chat=s;chat.loading=true;render();
   try{const [d,c,q]=await Promise.all([QuoteAPI.call(chat.sessionId,'dossier.list'),QuoteAPI.call(chat.sessionId,'catalog.list'),QuoteAPI.call(chat.sessionId,'quote.list',{history:true})]);if(s!==chat)return;chat.dossiers=d.dossiers;chat.catalog=c.items;chat.quotes=q.quotes;}
   catch(e){if(s===chat)chat.error='Lecture du serveur impossible : '+e.message;}
@@ -78,6 +80,7 @@
       const body = new FormData();
       body.append('audio', clip.blob, clip.name);
       body.append('sessionId', chat.sessionId);
+      body.append('idToken', await CognalysAuth.token());
       const response = await fetch('https://n8n.cognalys-intelligence.fr/webhook/cognalys/v2/audio', {
         method: 'POST', body, signal: controller.signal, credentials: 'omit',
         redirect: 'error', cache: 'no-store', referrerPolicy: 'no-referrer'
@@ -192,11 +195,13 @@
   if(el.dataset.revise){const q=s.quotes.find(q=>q.token===el.dataset.revise);s.quoteDraft={token:q.token,lines:q.lines.map(l=>({...l})),reason:''};go('devis');return;}
   if(el.dataset.removeLine!==undefined){captureFields();s.quoteDraft.lines.splice(Number(el.dataset.removeLine),1);render();return;}
   switch(el.dataset.act){
+   case 'logout':CognalysAuth.logout().catch(e=>{s.error=e.message;render();});break;
+   case 'check-access':CognalysAuth.check();break;
+   case 'auth-mode':s.signup=!s.signup;s.error='';render();break;
    case 'reload':s.error='';reload();break;
    case 'new-dossier':s.dossierDraft={};render();break;
    case 'new-catalog':s.catalogDraft={};render();break;
    case 'add-line':captureFields();s.quoteDraft.lines.push({catalogId:'',quantity:''});render();break;
-   case 'show-key':{const area=main.querySelector('#workspace-key');area.replaceChildren();const key=document.createElement('textarea');key.readOnly=true;key.value=QuoteAPI.getKey();key.setAttribute('aria-label','Clé privée de récupération');area.append(key);key.select();break;}
    case 'new-chat':if(!s.pending)newConversation();break;
    case 'record':record();break;case 'stop':stopRecording();break;
    case 'transcribe':transcribe(s.clip);break;
@@ -205,8 +210,9 @@
  });
  document.addEventListener('submit',e=>{
   e.preventDefault();const f=e.target;if(s.busy||s.pending)return;
+  if(f.id==='auth-form'){const email=f.elements.email.value.trim(),password=f.elements.password.value;s.busy=true;s.error='';render();CognalysAuth.login(email,password,s.signup).catch(e=>{s.error=e.message;}).finally(()=>{s.busy=false;render();});return;}
+  if(!CognalysAuth.state.access?.authorized)return;
   if(f.id==='chat-form'){const text=f.elements.answer.value.trim();if(text)sendMessage(text,s.clip);return;}
-  if(f.id==='workspace-form'){try{QuoteAPI.importKey(f.elements.workspaceKey.value.trim());}catch(e){s.error=e.message;render();}return;}
   captureFields();
   if(f.id==='dossier-form')operation(async()=>{const d=s.dossierDraft;const fields=Object.fromEntries(['nom_client','prenom_client','prestation','surface','adresse_chantier','adresse_facturation','frequence','notes'].map(k=>[k,d[k]||'']));const result=await QuoteAPI.call(s.sessionId,'dossier.save',{dossierId:d.dossierId,revision:d.revision,fields});s.dossierDraft=result.dossier;s.notice='Dossier enregistré par le serveur.';await reload();});
   if(f.id==='catalog-form')operation(async()=>{const c=s.catalogDraft;const result=await QuoteAPI.call(s.sessionId,'catalog.save',{...c,price:Number(c.price),vat:Number(c.vat)});s.catalogDraft=result.item;s.notice='Désignation enregistrée par le serveur.';await reload();});
@@ -214,6 +220,13 @@
    const result=await QuoteAPI.call(s.sessionId,old?'quote.revise':'quote.create',params);s.notice='PDF confirmé : '+result.quote.numero;s.quoteDraft={lines:[{catalogId:'',quantity:''}]};await reload();go('devis-pdf');await QuotePDF.action(s.sessionId,result.quote,'preview');});
  });
  window.addEventListener('hashchange',()=>{syncHistorySession(s.sessionId);s.notice='';QuotePDF.closePreview();render(true);});
- render();reload();
+ let signedIdentity='';
+ let knownUser;try{knownUser=sessionStorage.getItem('cognalys.account.uid');}catch{}
+ CognalysAuth.subscribe(()=>{
+  const a=CognalysAuth.state;const current=a.user?.uid+'|'+(a.access?.authorized?a.access.scope:'');
+  if(current!==signedIdentity){cancelCapture();QuotePDF.closePreview();for(const m of s.messages)if(m.audioUrl)URL.revokeObjectURL(m.audioUrl);if(s.clip)URL.revokeObjectURL(s.clip.url);const uid=a.user?.uid||'';s=fresh(startSession(knownUser!==uid));knownUser=uid;try{sessionStorage.setItem('cognalys.account.uid',uid);}catch{}signedIdentity=current;render();if(a.access?.authorized)reload();}else render();
+ });
+ render();
 })();
+
 

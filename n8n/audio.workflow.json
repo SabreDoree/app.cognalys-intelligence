@@ -131,20 +131,111 @@
           }
         }
       }
+    },
+    {
+      "id": "9d27a527-66d1-4459-9fab-e3f091035719",
+      "name": "Contrôler connexion",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        -600,
+        0
+      ],
+      "parameters": {
+        "source": "database",
+        "mode": "once",
+        "workflowId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "u3VnqXbcfWf0Ea2d"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "idToken": "={{ ($json.body ?? $json).idToken ?? '' }}"
+          },
+          "schema": [
+            {
+              "id": "idToken",
+              "displayName": "idToken",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      }
+    },
+    {
+      "id": "3ec0008d-4c10-4a4f-921c-0a8a25ada5e2",
+      "name": "Compte autorisé ?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -380,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.authorized === true }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      }
+    },
+    {
+      "id": "f12174df-e265-4fc6-b218-3d05b11979ae",
+      "name": "Refuser accès compte",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        -160,
+        260
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ {ok:false,error:$json.error || 'Accès refusé.'} }}",
+        "options": {
+          "responseCode": "={{ $json.statusCode || 403 }}",
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Cache-Control",
+                "value": "no-store"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "59e16694-b92f-4110-a3f3-f732b0859096",
+      "name": "Restaurer audio",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -140,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "return [{json:$('Audio V2').first().json,binary:$('Audio V2').first().binary}];"
+      }
     }
   ],
   "connections": {
-    "Audio V2": {
-      "main": [
-        [
-          {
-            "node": "Préparer audio",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
     "Préparer audio": {
       "main": [
         [
@@ -195,6 +286,57 @@
           }
         ]
       ]
+    },
+    "Audio V2": {
+      "main": [
+        [
+          {
+            "node": "Contrôler connexion",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Contrôler connexion": {
+      "main": [
+        [
+          {
+            "node": "Compte autorisé ?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Compte autorisé ?": {
+      "main": [
+        [
+          {
+            "node": "Restaurer audio",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Refuser accès compte",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Restaurer audio": {
+      "main": [
+        [
+          {
+            "node": "Préparer audio",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     }
   },
   "settings": {
@@ -203,6 +345,5 @@
     "saveManualExecutions": false,
     "saveDataErrorExecution": "none",
     "saveDataSuccessExecution": "none"
-  },
-  "activeVersionId": "176913b0-e026-4fb5-b93c-7105e46fce80"
+  }
 }

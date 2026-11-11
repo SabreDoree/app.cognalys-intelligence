@@ -40,24 +40,7 @@
       ],
       "parameters": {
         "mode": "runOnceForAllItems",
-        "jsCode": "'use strict';\nconst UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;\nfunction normalize(raw) {\n  const p=raw.body ?? raw;\n  if(!/^[0-9a-f]{64}$/.test(p.workspaceKey||'')) throw Error('Clé privée de démonstration absente ou invalide.');\n  if(!UUID.test(p.sessionId||'')) throw Error('sessionId doit être un UUID de conversation, jamais un dossierId.');\n  let params=p.params??{};\n  if(typeof params==='string') {try{params=JSON.parse(params);}catch{throw Error('Paramètres JSON invalides.');}}\n  if(!params||Array.isArray(params)||typeof params!=='object') throw Error('Paramètres invalides.');\n  if(JSON.stringify(params).length>40000) throw Error('Demande trop volumineuse.');\n  return {workspaceKey:p.workspaceKey,sessionId:p.sessionId,command:String(p.command||''),params,requestId:String(p.requestId||'')};\n}\n\nconst p=normalize($input.first().json);if(!UUID.test(p.params.token||''))throw Error('Jeton PDF invalide.');return [{json:p}];"
-      }
-    },
-    {
-      "id": "1f649cc7-163e-45f0-aaad-859a9eaa118b",
-      "name": "Espace PDF",
-      "type": "n8n-nodes-base.crypto",
-      "typeVersion": 1,
-      "position": [
-        448,
-        0
-      ],
-      "parameters": {
-        "action": "hash",
-        "type": "SHA256",
-        "value": "={{ $json.workspaceKey }}",
-        "dataPropertyName": "scope",
-        "encoding": "hex"
+        "jsCode": "'use strict';\nconst UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;\nfunction normalize(raw) {\n  const p=raw.body ?? raw;\n  if(typeof p.idToken!=='string'||!p.idToken)throw Error('Connexion requise.');\n  if(!UUID.test(p.sessionId||'')) throw Error('sessionId doit être un UUID de conversation, jamais un dossierId.');\n  let params=p.params??{};\n  if(typeof params==='string') {try{params=JSON.parse(params);}catch{throw Error('Paramètres JSON invalides.');}}\n  if(!params||Array.isArray(params)||typeof params!=='object') throw Error('Paramètres invalides.');\n  if(JSON.stringify(params).length>40000) throw Error('Demande trop volumineuse.');\n  return {idToken:p.idToken,sessionId:p.sessionId,command:String(p.command||''),params,requestId:String(p.requestId||'')};\n}\n\nconst p=normalize($('PDF privé').first().json);if(!UUID.test(p.params.token||''))throw Error('Jeton PDF invalide.');return [{json:p}];"
       }
     },
     {
@@ -206,42 +189,111 @@
           "responseCode": 404
         }
       }
+    },
+    {
+      "id": "c37fe427-fbbb-40f7-938b-e5fc2f43c679",
+      "name": "Contrôler connexion",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        -600,
+        0
+      ],
+      "parameters": {
+        "source": "database",
+        "mode": "once",
+        "workflowId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "u3VnqXbcfWf0Ea2d"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "idToken": "={{ ($json.body ?? $json).idToken ?? '' }}"
+          },
+          "schema": [
+            {
+              "id": "idToken",
+              "displayName": "idToken",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      }
+    },
+    {
+      "id": "203626d1-8948-44f8-a129-7dc08dd7742e",
+      "name": "Compte autorisé ?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -380,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.authorized === true }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      }
+    },
+    {
+      "id": "0a4e69f4-f3b6-457c-b949-8038df483184",
+      "name": "Refuser accès compte",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        -160,
+        260
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ {ok:false,error:$json.error || 'Accès refusé.'} }}",
+        "options": {
+          "responseCode": "={{ $json.statusCode || 403 }}",
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Cache-Control",
+                "value": "no-store"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "e6409102-ec78-4b79-baa4-c8e79a4dd5ad",
+      "name": "Espace PDF",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        448,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "return [{json:{...$input.first().json,scope:$('Contrôler connexion').first().json.scope}}];"
+      }
     }
   ],
   "connections": {
-    "PDF privé": {
-      "main": [
-        [
-          {
-            "node": "Valider accès",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Valider accès": {
-      "main": [
-        [
-          {
-            "node": "Espace PDF",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Espace PDF": {
-      "main": [
-        [
-          {
-            "node": "Chercher version privée",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
     "Chercher version privée": {
       "main": [
         [
@@ -292,6 +344,68 @@
           }
         ]
       ]
+    },
+    "PDF privé": {
+      "main": [
+        [
+          {
+            "node": "Contrôler connexion",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Contrôler connexion": {
+      "main": [
+        [
+          {
+            "node": "Compte autorisé ?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Compte autorisé ?": {
+      "main": [
+        [
+          {
+            "node": "Valider accès",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Refuser accès compte",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Valider accès": {
+      "main": [
+        [
+          {
+            "node": "Espace PDF",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Espace PDF": {
+      "main": [
+        [
+          {
+            "node": "Chercher version privée",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     }
   },
   "settings": {
@@ -300,6 +414,5 @@
     "saveManualExecutions": false,
     "saveDataErrorExecution": "none",
     "saveDataSuccessExecution": "none"
-  },
-  "activeVersionId": "209710a2-3273-4eb7-b66b-de763511ae32"
+  }
 }

@@ -14,7 +14,7 @@
       "parameters": {
         "httpMethod": "POST",
         "path": "cognalys/v2/chat",
-        "responseMode": "lastNode",
+        "responseMode": "responseNode",
         "options": {
           "allowedOrigins": "https://app.cognalys-intelligence.fr,https://sabredoree.github.io",
           "responseHeaders": {
@@ -40,24 +40,7 @@
       ],
       "parameters": {
         "mode": "runOnceForAllItems",
-        "jsCode": "'use strict';\nconst UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;\nfunction normalize(raw) {\n  const p=raw.body ?? raw;\n  if(!/^[0-9a-f]{64}$/.test(p.workspaceKey||'')) throw Error('Clé privée de démonstration absente ou invalide.');\n  if(!UUID.test(p.sessionId||'')) throw Error('sessionId doit être un UUID de conversation, jamais un dossierId.');\n  let params=p.params??{};\n  if(typeof params==='string') {try{params=JSON.parse(params);}catch{throw Error('Paramètres JSON invalides.');}}\n  if(!params||Array.isArray(params)||typeof params!=='object') throw Error('Paramètres invalides.');\n  if(JSON.stringify(params).length>40000) throw Error('Demande trop volumineuse.');\n  return {workspaceKey:p.workspaceKey,sessionId:p.sessionId,command:String(p.command||''),params,requestId:String(p.requestId||'')};\n}\n\nconst raw=$input.first().json;const p=normalize(raw);const body=raw.body??raw;if(!String(body.chatInput||'').trim()||String(body.chatInput).length>8000)throw Error('Message requis, maximum 8000 caractères.');return [{json:{...p,chatInput:String(body.chatInput).trim()}}];"
-      }
-    },
-    {
-      "id": "77cc85fc-797d-46f0-a7fa-e845743e8c9f",
-      "name": "Empreinte espace",
-      "type": "n8n-nodes-base.crypto",
-      "typeVersion": 1,
-      "position": [
-        448,
-        112
-      ],
-      "parameters": {
-        "action": "hash",
-        "type": "SHA256",
-        "value": "={{ $('Entrée privée').first().json.workspaceKey }}",
-        "dataPropertyName": "scope",
-        "encoding": "hex"
+        "jsCode": "'use strict';\nconst UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;\nfunction normalize(raw) {\n  const p=raw.body ?? raw;\n  if(typeof p.idToken!=='string'||!p.idToken)throw Error('Connexion requise.');\n  if(!UUID.test(p.sessionId||'')) throw Error('sessionId doit être un UUID de conversation, jamais un dossierId.');\n  let params=p.params??{};\n  if(typeof params==='string') {try{params=JSON.parse(params);}catch{throw Error('Paramètres JSON invalides.');}}\n  if(!params||Array.isArray(params)||typeof params!=='object') throw Error('Paramètres invalides.');\n  if(JSON.stringify(params).length>40000) throw Error('Demande trop volumineuse.');\n  return {idToken:p.idToken,sessionId:p.sessionId,command:String(p.command||''),params,requestId:String(p.requestId||'')};\n}\n\nconst raw=$('Chat privé').first().json;const p=normalize(raw);const body=raw.body??raw;if(!String(body.chatInput||'').trim()||String(body.chatInput).length>8000)throw Error('Message requis, maximum 8000 caractères.');return [{json:{...p,chatInput:String(body.chatInput).trim()}}];"
       }
     },
     {
@@ -137,12 +120,13 @@
             "sessionId": "={{ $('Entrée privée').first().json.sessionId }}",
             "command": "={{ $fromAI('command','Commande métier exacte, par exemple dossier.search ou quote.find','string') }}",
             "params": "={{ $fromAI('params','Objet JSON sérialisé correspondant à la commande, sans clé privée ni sessionId','string') }}",
-            "requestId": ""
+            "requestId": "",
+            "idToken": "={{ $('Entrée privée').first().json.idToken }}"
           },
           "schema": [
             {
-              "id": "workspaceKey",
-              "displayName": "workspaceKey",
+              "id": "idToken",
+              "displayName": "idToken",
               "type": "string",
               "display": true,
               "required": false
@@ -192,42 +176,135 @@
         "mode": "runOnceForAllItems",
         "jsCode": "const d=$input.first().json;let document=null;for(const step of d.intermediateSteps||[]){let value=step.observation;try{if(typeof value==='string')value=JSON.parse(value);if(Array.isArray(value))value=value[0];if(value?.json)value=value.json;if(value?.ok&&value.quote?.token)document=value.quote;}catch{}}return [{json:{output:d.output,document}}];"
       }
+    },
+    {
+      "id": "2028fcd9-13c7-459f-bb3b-640624bfeae2",
+      "name": "Contrôler connexion",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        -600,
+        0
+      ],
+      "parameters": {
+        "source": "database",
+        "mode": "once",
+        "workflowId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "u3VnqXbcfWf0Ea2d"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "idToken": "={{ ($json.body ?? $json).idToken ?? '' }}"
+          },
+          "schema": [
+            {
+              "id": "idToken",
+              "displayName": "idToken",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      }
+    },
+    {
+      "id": "ee6d961a-d4be-40a5-9659-848a39ed6da1",
+      "name": "Compte autorisé ?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -380,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.authorized === true }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      }
+    },
+    {
+      "id": "ea349d71-ef3f-4b65-b685-e50620b28a3f",
+      "name": "Refuser accès compte",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        -160,
+        260
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ {ok:false,error:$json.error || 'Accès refusé.'} }}",
+        "options": {
+          "responseCode": "={{ $json.statusCode || 403 }}",
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Cache-Control",
+                "value": "no-store"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "96a4b289-28a2-4b68-8448-3db4ed8c8eae",
+      "name": "Empreinte espace",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        448,
+        112
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "return [{json:{...$input.first().json,scope:$('Contrôler connexion').first().json.scope}}];"
+      }
+    },
+    {
+      "id": "ae0daa78-8430-4cee-88ce-559a472970cf",
+      "name": "Répondre résultat",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        3400,
+        0
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}",
+        "options": {
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Cache-Control",
+                "value": "no-store"
+              }
+            ]
+          }
+        }
+      }
     }
   ],
   "connections": {
-    "Chat privé": {
-      "main": [
-        [
-          {
-            "node": "Entrée privée",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Entrée privée": {
-      "main": [
-        [
-          {
-            "node": "Empreinte espace",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Empreinte espace": {
-      "main": [
-        [
-          {
-            "node": "Assistant V2",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
     "Assistant V2": {
       "main": [
         [
@@ -271,6 +348,79 @@
           }
         ]
       ]
+    },
+    "Chat privé": {
+      "main": [
+        [
+          {
+            "node": "Contrôler connexion",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Contrôler connexion": {
+      "main": [
+        [
+          {
+            "node": "Compte autorisé ?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Compte autorisé ?": {
+      "main": [
+        [
+          {
+            "node": "Entrée privée",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Refuser accès compte",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Entrée privée": {
+      "main": [
+        [
+          {
+            "node": "Empreinte espace",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Empreinte espace": {
+      "main": [
+        [
+          {
+            "node": "Assistant V2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Réponse et PDF confirmé": {
+      "main": [
+        [
+          {
+            "node": "Répondre résultat",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     }
   },
   "settings": {
@@ -278,7 +428,7 @@
     "availableInMCP": true,
     "saveManualExecutions": false,
     "saveDataErrorExecution": "none",
-    "saveDataSuccessExecution": "none"
-  },
-  "activeVersionId": "1602d43e-8024-4e55-b616-93c179319679"
+    "saveDataSuccessExecution": "none",
+    "binaryMode": "separate"
+  }
 }

@@ -14,7 +14,7 @@
       "parameters": {
         "httpMethod": "POST",
         "path": "cognalys/v2/api",
-        "responseMode": "lastNode",
+        "responseMode": "responseNode",
         "options": {
           "allowedOrigins": "https://app.cognalys-intelligence.fr,https://sabredoree.github.io",
           "responseHeaders": {
@@ -40,24 +40,7 @@
       ],
       "parameters": {
         "mode": "runOnceForAllItems",
-        "jsCode": "'use strict';\nconst UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;\nfunction normalize(raw) {\n  const p=raw.body ?? raw;\n  if(!/^[0-9a-f]{64}$/.test(p.workspaceKey||'')) throw Error('Clé privée de démonstration absente ou invalide.');\n  if(!UUID.test(p.sessionId||'')) throw Error('sessionId doit être un UUID de conversation, jamais un dossierId.');\n  let params=p.params??{};\n  if(typeof params==='string') {try{params=JSON.parse(params);}catch{throw Error('Paramètres JSON invalides.');}}\n  if(!params||Array.isArray(params)||typeof params!=='object') throw Error('Paramètres invalides.');\n  if(JSON.stringify(params).length>40000) throw Error('Demande trop volumineuse.');\n  return {workspaceKey:p.workspaceKey,sessionId:p.sessionId,command:String(p.command||''),params,requestId:String(p.requestId||'')};\n}\nfunction service(req, rows, token, now=new Date().toISOString()) {\n  const p=req.params, command=req.command;\n  const clean=(v,max=1000)=>{if(typeof v!=='string'||v.length>max)throw Error('Texte invalide ou trop long.');return v.trim();};\n  const norm=v=>String(v??'').normalize('NFD').replace(/[\\u0300-\\u036f]/g,'').toLowerCase().trim().replace(/\\s+/g,' ');\n  const num=(v,min,max,dec=2)=>{if((typeof v!=='number'&&typeof v!=='string')||String(v).trim()===''||!/^\\d+(\\.\\d+)?$/.test(String(v)))throw Error('Nombre requis.');const n=Number(v);if(!Number.isFinite(n)||n<min||n>max||Math.abs(n*10**dec-Math.round(n*10**dec))>1e-6)throw Error('Nombre hors limites.');return n;};\n  const events=rows.filter(r=>r.scope===req.scope&&r.payload).sort((a,b)=>Number(a.id)-Number(b.id)).map(r=>({...r,data:JSON.parse(r.payload)}));\n  const latest=kind=>{const m=new Map();for(const e of events.filter(e=>e.kind===kind))m.set(e.entity,e.data);return [...m.values()];};\n  const catalog=latest('catalog'), dossiers=latest('dossier'), quotes=events.filter(e=>e.kind==='quote').map(e=>e.data);\n  const headQuotes=()=>quotes.filter(q=>!quotes.some(r=>r.parentToken===q.token));\n  const current=q=>headQuotes().filter(r=>r.quoteId===q.quoteId);\n  const decorate=q=>({...q,current:current(q).some(x=>x.token===q.token),conflict:current(q).length>1,stale:dossiers.find(d=>d.dossierId===q.dossierId)?.revision!==q.client.revision});\n  const out=result=>({result:{ok:true,...result},write:false,pdf:false});\n  const write=(kind,entity,data,result,pdf=false)=>({result:{ok:true,...result},write:true,pdf,event:{scope:req.scope,kind,entity,requestId:req.requestId,payload:JSON.stringify(data)}});\n  const lookup=(list,ref,fields)=>list.filter(r=>fields.some(f=>norm(r[f])&&norm(r[f])===norm(ref)));\n  const one=(list,label)=>{if(list.length!==1)throw Error(list.length?'Plusieurs '+label+' correspondent : précisez l’identifiant.':label+' introuvable dans cet espace.');return list[0];};\n  const getDossier=id=>one(dossiers.filter(d=>d.dossierId===id),'Dossier');\n  const getQuote=()=>{if(p.token)return one(quotes.filter(q=>q.token===p.token),'Devis');let found=lookup(quotes,p.ref||p.quoteId||p.dossierId,['quoteId','numero','dossierId','clientName']);if(!found.length&&p.ref){const ds=dossiers.filter(d=>[d.nom_client,d.prenom_client,d.clientName,d.dossierId].some(v=>norm(v)===norm(p.ref)));found=quotes.filter(q=>ds.some(d=>d.dossierId===q.dossierId));}if(p.version)found=found.filter(q=>q.version===Number(p.version));else found=found.filter(q=>headQuotes().some(h=>h.token===q.token));return one(found,'Devis');};\n  const isWrite=['catalog.save','catalog.delete','dossier.save','quote.create','quote.revise'].includes(command);\n  if(isWrite){if(!UUID.test(req.requestId))throw Error('requestId UUID obligatoire.');const prior=events.find(e=>e.requestId===req.requestId);if(prior){if(prior.kind!==command.split('.')[0])throw Error('requestId déjà utilisé.');return out({replayed:true,[prior.kind==='quote'?'quote':prior.kind==='dossier'?'dossier':'item']:prior.kind==='quote'?decorate(prior.data):prior.data});}}\n  if(command==='catalog.list')return out({items:catalog.filter(x=>!x.deleted)});\n  if(command==='catalog.save'||command==='catalog.delete'){\n    const old=p.id?one(catalog.filter(c=>c.id===p.id&&!c.deleted),'Désignation'):null;\n    if(old&&p.revision!==old.revision)throw Error('Catalogue modifié entre-temps. Rechargez avant d’enregistrer.');\n    if(command==='catalog.delete'){\n      if(quotes.some(q=>q.lines.some(l=>l.catalogId===old.id)))throw Error('Désignation utilisée : désactivez-la pour conserver son historique.');\n      const item={...old,deleted:true,active:false,revision:old.revision+1};return write('catalog',item.id,item,{item});\n    }\n    const label=clean(p.label,160),description=clean(p.description??'',1000),unit=clean(p.unit,30);\n    if(!label||!unit)throw Error('Libellé et unité requis.');\n    const item={id:old?.id||'CAT-'+token,label,description,unit,price:num(p.price,0,1000000),vat:num(p.vat,0,100),active:p.active!==false,revision:(old?.revision||0)+1,deleted:false};\n    return write('catalog',item.id,item,{item});\n  }\n  if(command==='dossier.list')return out({dossiers});\n  if(command==='dossier.search'){\n    const result=lookup(dossiers,clean(p.ref||'',160),['dossierId','nom_client','prenom_client','clientName']);\n    return out({status:result.length===1?'trouve':result.length?'ambigu':'introuvable',dossiers:result});\n  }\n  if(command==='dossier.save'){\n    const old=p.dossierId?getDossier(p.dossierId):null;\n    if(old&&p.revision!==old.revision)throw Error('Dossier modifié entre-temps. Recherchez-le à nouveau.');\n    const fields=['nom_client','prenom_client','prestation','surface','adresse_chantier','adresse_facturation','frequence','notes'];\n    const dossier={...(old||{}),dossierId:old?.dossierId||'DOS-'+token,sessionId:old?.sessionId||req.sessionId,revision:(old?.revision||0)+1,updatedAt:now};\n    const changes=p.fields;if(!changes||typeof changes!=='object'||Array.isArray(changes))throw Error('Champs de dossier requis.');\n    for(const key of Object.keys(changes))if(!fields.includes(key))throw Error('Champ de dossier inconnu : '+key);\n    for(const key of fields)dossier[key]=Object.hasOwn(changes,key)?clean(changes[key],key==='notes'?2000:1000):String(old?.[key]||'');\n    dossier.clientName=[dossier.prenom_client,dossier.nom_client].filter(Boolean).join(' ');\n    if(!dossier.clientName||!dossier.prestation)throw Error('Client identifiable et prestation requis ; les autres champs sont facultatifs.');\n    if(!old&&dossiers.some(d=>norm(d.clientName)===norm(dossier.clientName)&&norm(d.prestation)===norm(dossier.prestation))&&!p.confirmNew)throw Error('Demande similaire existante. Recherchez le dossier ou confirmez une nouvelle demande distincte.');\n    return write('dossier',dossier.dossierId,dossier,{dossier});\n  }\n  if(command==='quote.list')return out({quotes:(p.history?quotes:headQuotes()).map(decorate).reverse()});\n  if(command==='quote.find') {const quote=decorate(getQuote());return out({quote});}\n  if(command==='quote.create'||command==='quote.revise'){\n    const old=command==='quote.revise'?getQuote():null;\n    if(old&&(!decorate(old).current||decorate(old).conflict))throw Error('Révision refusée : sélectionnez une version courante non ambiguë.');\n    const client=getDossier(old?.dossierId||p.dossierId);\n    let lines;\n    const makeLine=(l,index)=>{\n      const c=one(catalog.filter(c=>c.id===l.catalogId&&!c.deleted&&c.active),'Désignation active');\n      const quantity=num(l.quantity,0.001,1000000,3),price=c.price,vat=c.vat;\n      const ht=Math.round(quantity*Math.round(price*100)),tax=Math.round(ht*vat/100);\n      if(ht>100000000000)throw Error('Montant de ligne trop élevé.');\n      return {lineId:token+'-'+index,catalogId:c.id,catalogRevision:c.revision,label:c.label,description:c.description,unit:c.unit,quantity,price,vat,htCents:ht,vatCents:tax};\n    };\n    if(old){\n      lines=old.lines.map(l=>({...l}));\n      if(p.quantities){for(const change of p.quantities){const l=one(lines.filter(l=>l.lineId===change.lineId),'Ligne');l.quantity=num(change.quantity,0.001,1000000,3);l.htCents=Math.round(l.quantity*Math.round(l.price*100));l.vatCents=Math.round(l.htCents*l.vat/100);}}\n      if(p.removeLineIds){if(!Array.isArray(p.removeLineIds))throw Error('Liste de lignes invalide.');for(const id of p.removeLineIds)one(lines.filter(l=>l.lineId===id),'Ligne');lines=lines.filter(l=>!p.removeLineIds.includes(l.lineId));}\n      if(p.addLines){if(!Array.isArray(p.addLines))throw Error('Lignes invalides.');lines.push(...p.addLines.map(makeLine));}\n    }else{if(!Array.isArray(p.lines))throw Error('Sélectionnez les désignations et quantités.');lines=p.lines.map(makeLine);}\n    if(!lines.length||lines.length>50)throw Error('Le devis doit comporter entre 1 et 50 lignes chiffrées.');\n    const htCents=lines.reduce((s,l)=>s+l.htCents,0),vatCents=lines.reduce((s,l)=>s+l.vatCents,0);\n    const quoteId=old?.quoteId||'DEV-'+now.slice(0,10).replace(/-/g,'')+'-'+token.replace(/-/g,'').slice(0,12).toUpperCase();\n    const version=(old?.version||0)+1;\n    const quote={quoteId,numero:quoteId+'-V'+version,token,version,parentToken:old?.token||null,dossierId:client.dossierId,clientName:client.clientName,client:{...client},sessionId:req.sessionId,createdAt:now,lines,htCents,vatCents,ttcCents:htCents+vatCents,status:'brouillon',reason:clean(p.reason||'Création',500)};\n    return write('quote',quoteId,quote,{quote:{...quote,current:true,conflict:false,stale:false}},true);\n  }\n  throw Error('Commande inconnue.');\n}\n\n\nreturn [{json:normalize($input.first().json)}];"
-      }
-    },
-    {
-      "id": "62605252-dc57-4630-bef6-5beb1b86008a",
-      "name": "Espace privé",
-      "type": "n8n-nodes-base.crypto",
-      "typeVersion": 1,
-      "position": [
-        448,
-        96
-      ],
-      "parameters": {
-        "action": "hash",
-        "type": "SHA256",
-        "value": "={{ $json.workspaceKey }}",
-        "dataPropertyName": "scope",
-        "encoding": "hex"
+        "jsCode": "'use strict';\nconst UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;\nfunction normalize(raw) {\n  const p=raw.body ?? raw;\n  if(typeof p.idToken!=='string'||!p.idToken)throw Error('Connexion requise.');\n  if(!UUID.test(p.sessionId||'')) throw Error('sessionId doit être un UUID de conversation, jamais un dossierId.');\n  let params=p.params??{};\n  if(typeof params==='string') {try{params=JSON.parse(params);}catch{throw Error('Paramètres JSON invalides.');}}\n  if(!params||Array.isArray(params)||typeof params!=='object') throw Error('Paramètres invalides.');\n  if(JSON.stringify(params).length>40000) throw Error('Demande trop volumineuse.');\n  return {idToken:p.idToken,sessionId:p.sessionId,command:String(p.command||''),params,requestId:String(p.requestId||'')};\n}\nfunction service(req, rows, token, now=new Date().toISOString()) {\n  const p=req.params, command=req.command;\n  const clean=(v,max=1000)=>{if(typeof v!=='string'||v.length>max)throw Error('Texte invalide ou trop long.');return v.trim();};\n  const norm=v=>String(v??'').normalize('NFD').replace(/[\\u0300-\\u036f]/g,'').toLowerCase().trim().replace(/\\s+/g,' ');\n  const num=(v,min,max,dec=2)=>{if((typeof v!=='number'&&typeof v!=='string')||String(v).trim()===''||!/^\\d+(\\.\\d+)?$/.test(String(v)))throw Error('Nombre requis.');const n=Number(v);if(!Number.isFinite(n)||n<min||n>max||Math.abs(n*10**dec-Math.round(n*10**dec))>1e-6)throw Error('Nombre hors limites.');return n;};\n  const events=rows.filter(r=>r.scope===req.scope&&r.payload).sort((a,b)=>Number(a.id)-Number(b.id)).map(r=>({...r,data:JSON.parse(r.payload)}));\n  const latest=kind=>{const m=new Map();for(const e of events.filter(e=>e.kind===kind))m.set(e.entity,e.data);return [...m.values()];};\n  const catalog=latest('catalog'), dossiers=latest('dossier'), quotes=events.filter(e=>e.kind==='quote').map(e=>e.data);\n  const headQuotes=()=>quotes.filter(q=>!quotes.some(r=>r.parentToken===q.token));\n  const current=q=>headQuotes().filter(r=>r.quoteId===q.quoteId);\n  const decorate=q=>({...q,current:current(q).some(x=>x.token===q.token),conflict:current(q).length>1,stale:dossiers.find(d=>d.dossierId===q.dossierId)?.revision!==q.client.revision});\n  const out=result=>({result:{ok:true,...result},write:false,pdf:false});\n  const write=(kind,entity,data,result,pdf=false)=>({result:{ok:true,...result},write:true,pdf,event:{scope:req.scope,kind,entity,requestId:req.requestId,payload:JSON.stringify(data)}});\n  const lookup=(list,ref,fields)=>list.filter(r=>fields.some(f=>norm(r[f])&&norm(r[f])===norm(ref)));\n  const one=(list,label)=>{if(list.length!==1)throw Error(list.length?'Plusieurs '+label+' correspondent : précisez l’identifiant.':label+' introuvable dans cet espace.');return list[0];};\n  const getDossier=id=>one(dossiers.filter(d=>d.dossierId===id),'Dossier');\n  const getQuote=()=>{if(p.token)return one(quotes.filter(q=>q.token===p.token),'Devis');let found=lookup(quotes,p.ref||p.quoteId||p.dossierId,['quoteId','numero','dossierId','clientName']);if(!found.length&&p.ref){const ds=dossiers.filter(d=>[d.nom_client,d.prenom_client,d.clientName,d.dossierId].some(v=>norm(v)===norm(p.ref)));found=quotes.filter(q=>ds.some(d=>d.dossierId===q.dossierId));}if(p.version)found=found.filter(q=>q.version===Number(p.version));else found=found.filter(q=>headQuotes().some(h=>h.token===q.token));return one(found,'Devis');};\n  const isWrite=['catalog.save','catalog.delete','dossier.save','quote.create','quote.revise'].includes(command);\n  if(isWrite){if(!UUID.test(req.requestId))throw Error('requestId UUID obligatoire.');const prior=events.find(e=>e.requestId===req.requestId);if(prior){if(prior.kind!==command.split('.')[0])throw Error('requestId déjà utilisé.');return out({replayed:true,[prior.kind==='quote'?'quote':prior.kind==='dossier'?'dossier':'item']:prior.kind==='quote'?decorate(prior.data):prior.data});}}\n  if(command==='catalog.list')return out({items:catalog.filter(x=>!x.deleted)});\n  if(command==='catalog.save'||command==='catalog.delete'){\n    const old=p.id?one(catalog.filter(c=>c.id===p.id&&!c.deleted),'Désignation'):null;\n    if(old&&p.revision!==old.revision)throw Error('Catalogue modifié entre-temps. Rechargez avant d’enregistrer.');\n    if(command==='catalog.delete'){\n      if(quotes.some(q=>q.lines.some(l=>l.catalogId===old.id)))throw Error('Désignation utilisée : désactivez-la pour conserver son historique.');\n      const item={...old,deleted:true,active:false,revision:old.revision+1};return write('catalog',item.id,item,{item});\n    }\n    const label=clean(p.label,160),description=clean(p.description??'',1000),unit=clean(p.unit,30);\n    if(!label||!unit)throw Error('Libellé et unité requis.');\n    const item={id:old?.id||'CAT-'+token,label,description,unit,price:num(p.price,0,1000000),vat:num(p.vat,0,100),active:p.active!==false,revision:(old?.revision||0)+1,deleted:false};\n    return write('catalog',item.id,item,{item});\n  }\n  if(command==='dossier.list')return out({dossiers});\n  if(command==='dossier.search'){\n    const result=lookup(dossiers,clean(p.ref||'',160),['dossierId','nom_client','prenom_client','clientName']);\n    return out({status:result.length===1?'trouve':result.length?'ambigu':'introuvable',dossiers:result});\n  }\n  if(command==='dossier.save'){\n    const old=p.dossierId?getDossier(p.dossierId):null;\n    if(old&&p.revision!==old.revision)throw Error('Dossier modifié entre-temps. Recherchez-le à nouveau.');\n    const fields=['nom_client','prenom_client','prestation','surface','adresse_chantier','adresse_facturation','frequence','notes'];\n    const dossier={...(old||{}),dossierId:old?.dossierId||'DOS-'+token,sessionId:old?.sessionId||req.sessionId,revision:(old?.revision||0)+1,updatedAt:now};\n    const changes=p.fields;if(!changes||typeof changes!=='object'||Array.isArray(changes))throw Error('Champs de dossier requis.');\n    for(const key of Object.keys(changes))if(!fields.includes(key))throw Error('Champ de dossier inconnu : '+key);\n    for(const key of fields)dossier[key]=Object.hasOwn(changes,key)?clean(changes[key],key==='notes'?2000:1000):String(old?.[key]||'');\n    dossier.clientName=[dossier.prenom_client,dossier.nom_client].filter(Boolean).join(' ');\n    if(!dossier.clientName||!dossier.prestation)throw Error('Client identifiable et prestation requis ; les autres champs sont facultatifs.');\n    if(!old&&dossiers.some(d=>norm(d.clientName)===norm(dossier.clientName)&&norm(d.prestation)===norm(dossier.prestation))&&!p.confirmNew)throw Error('Demande similaire existante. Recherchez le dossier ou confirmez une nouvelle demande distincte.');\n    return write('dossier',dossier.dossierId,dossier,{dossier});\n  }\n  if(command==='quote.list')return out({quotes:(p.history?quotes:headQuotes()).map(decorate).reverse()});\n  if(command==='quote.find') {const quote=decorate(getQuote());return out({quote});}\n  if(command==='quote.create'||command==='quote.revise'){\n    const old=command==='quote.revise'?getQuote():null;\n    if(old&&(!decorate(old).current||decorate(old).conflict))throw Error('Révision refusée : sélectionnez une version courante non ambiguë.');\n    const client=getDossier(old?.dossierId||p.dossierId);\n    let lines;\n    const makeLine=(l,index)=>{\n      const c=one(catalog.filter(c=>c.id===l.catalogId&&!c.deleted&&c.active),'Désignation active');\n      const quantity=num(l.quantity,0.001,1000000,3),price=c.price,vat=c.vat;\n      const ht=Math.round(quantity*Math.round(price*100)),tax=Math.round(ht*vat/100);\n      if(ht>100000000000)throw Error('Montant de ligne trop élevé.');\n      return {lineId:token+'-'+index,catalogId:c.id,catalogRevision:c.revision,label:c.label,description:c.description,unit:c.unit,quantity,price,vat,htCents:ht,vatCents:tax};\n    };\n    if(old){\n      lines=old.lines.map(l=>({...l}));\n      if(p.quantities){for(const change of p.quantities){const l=one(lines.filter(l=>l.lineId===change.lineId),'Ligne');l.quantity=num(change.quantity,0.001,1000000,3);l.htCents=Math.round(l.quantity*Math.round(l.price*100));l.vatCents=Math.round(l.htCents*l.vat/100);}}\n      if(p.removeLineIds){if(!Array.isArray(p.removeLineIds))throw Error('Liste de lignes invalide.');for(const id of p.removeLineIds)one(lines.filter(l=>l.lineId===id),'Ligne');lines=lines.filter(l=>!p.removeLineIds.includes(l.lineId));}\n      if(p.addLines){if(!Array.isArray(p.addLines))throw Error('Lignes invalides.');lines.push(...p.addLines.map(makeLine));}\n    }else{if(!Array.isArray(p.lines))throw Error('Sélectionnez les désignations et quantités.');lines=p.lines.map(makeLine);}\n    if(!lines.length||lines.length>50)throw Error('Le devis doit comporter entre 1 et 50 lignes chiffrées.');\n    const htCents=lines.reduce((s,l)=>s+l.htCents,0),vatCents=lines.reduce((s,l)=>s+l.vatCents,0);\n    const quoteId=old?.quoteId||'DEV-'+now.slice(0,10).replace(/-/g,'')+'-'+token.replace(/-/g,'').slice(0,12).toUpperCase();\n    const version=(old?.version||0)+1;\n    const quote={quoteId,numero:quoteId+'-V'+version,token,version,parentToken:old?.token||null,dossierId:client.dossierId,clientName:client.clientName,client:{...client},sessionId:req.sessionId,createdAt:now,lines,htCents,vatCents,ttcCents:htCents+vatCents,status:'brouillon',reason:clean(p.reason||'Création',500)};\n    return write('quote',quoteId,quote,{quote:{...quote,current:true,conflict:false,stale:false}},true);\n  }\n  throw Error('Commande inconnue.');\n}\n\n\nreturn [{json:normalize(($('API demo privée').isExecuted ? $('API demo privée').first().json : $('Outil métier').first().json))}];"
       }
     },
     {
@@ -367,7 +350,7 @@
         "workflowInputs": {
           "values": [
             {
-              "name": "workspaceKey"
+              "name": "idToken"
             },
             {
               "name": "sessionId"
@@ -384,42 +367,135 @@
           ]
         }
       }
+    },
+    {
+      "id": "94fa3d2e-c9df-40d7-b5c0-ae338803eb75",
+      "name": "Contrôler connexion",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        -600,
+        0
+      ],
+      "parameters": {
+        "source": "database",
+        "mode": "once",
+        "workflowId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "u3VnqXbcfWf0Ea2d"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "idToken": "={{ ($json.body ?? $json).idToken ?? '' }}"
+          },
+          "schema": [
+            {
+              "id": "idToken",
+              "displayName": "idToken",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      }
+    },
+    {
+      "id": "9d8abab6-7c4a-460a-ae8f-b841e050215d",
+      "name": "Compte autorisé ?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -380,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.authorized === true }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      }
+    },
+    {
+      "id": "9da2891b-39e4-46ec-8596-ee19d0435792",
+      "name": "Refuser accès compte",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        -160,
+        260
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ {ok:false,error:$json.error || 'Accès refusé.'} }}",
+        "options": {
+          "responseCode": "={{ $json.statusCode || 403 }}",
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Cache-Control",
+                "value": "no-store"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "ed0c5ee5-f4c4-4e82-b589-5740ae3a48ee",
+      "name": "Espace privé",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        448,
+        96
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "return [{json:{...$input.first().json,scope:$('Contrôler connexion').first().json.scope}}];"
+      }
+    },
+    {
+      "id": "3910e18e-7135-4993-9766-d25516cb4d61",
+      "name": "Répondre résultat",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        3400,
+        0
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}",
+        "options": {
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Cache-Control",
+                "value": "no-store"
+              }
+            ]
+          }
+        }
+      }
     }
   ],
   "connections": {
-    "API demo privée": {
-      "main": [
-        [
-          {
-            "node": "Valider identifiants",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Valider identifiants": {
-      "main": [
-        [
-          {
-            "node": "Espace privé",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Espace privé": {
-      "main": [
-        [
-          {
-            "node": "Jeton version",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
     "Jeton version": {
       "main": [
         [
@@ -555,11 +631,84 @@
         ]
       ]
     },
+    "API demo privée": {
+      "main": [
+        [
+          {
+            "node": "Contrôler connexion",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
     "Outil métier": {
       "main": [
         [
           {
+            "node": "Contrôler connexion",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Contrôler connexion": {
+      "main": [
+        [
+          {
+            "node": "Compte autorisé ?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Compte autorisé ?": {
+      "main": [
+        [
+          {
             "node": "Valider identifiants",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Refuser accès compte",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Valider identifiants": {
+      "main": [
+        [
+          {
+            "node": "Espace privé",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Espace privé": {
+      "main": [
+        [
+          {
+            "node": "Jeton version",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Résultat serveur": {
+      "main": [
+        [
+          {
+            "node": "Répondre résultat",
             "type": "main",
             "index": 0
           }
@@ -573,6 +722,5 @@
     "saveManualExecutions": false,
     "saveDataErrorExecution": "none",
     "saveDataSuccessExecution": "none"
-  },
-  "activeVersionId": "0887ff38-e8b1-4ab2-8a0a-1361e06aeccf"
+  }
 }
