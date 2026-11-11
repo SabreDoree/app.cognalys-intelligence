@@ -756,6 +756,164 @@ textarea {
   .pdf-actions .secondary { width: 100%; }
 }
 
-/* Private demonstration workspace */
-.top nav{display:flex;flex-wrap:wrap;gap:14px;align-items:center}.top nav a{font-size:13px;text-decoration:none;color:var(--ink,#19243a)}main{max-width:1160px}.workspace-grid{display:grid;grid-template-columns:1fr 1fr;gap:22px;align-items:start}.workspace-grid .box{margin-top:0}.quote-line{display:grid;grid-template-columns:2fr 1fr auto;gap:14px;align-items:end;padding:18px 0;border-bottom:1px solid #d7e0eb}.quote-line small{display:block}.quote-line label{display:block}.quote-line select,.quote-line input{width:100%}input[type=checkbox]{width:auto;min-height:auto}.error{color:#9b1c1c;background:#fff1f1;padding:14px;border-radius:10px}.notice{color:#145237;background:#edf9f1;padding:14px;border-radius:10px}#workspace-key textarea{width:100%;height:100px;margin-top:15px;font-family:monospace;overflow-wrap:anywhere}.pdf-heading{gap:12px;flex-wrap:wrap}.pdf-card h3{overflow-wrap:anywhere}.pdf-actions{flex-wrap:wrap}.fields{min-width:0}.box{min-width:0}button:disabled{opacity:.55;cursor:wait}.workspace-grid h2{font-size:19px}a{color:#2463b4}#quote-form>div{margin:15px 0}@media(max-width:800px){.workspace-grid{grid-template-columns:1fr}.top{gap:15px;flex-wrap:wrap}.top nav{gap:10px}.quote-line{grid-template-columns:1fr 1fr}.quote-line>button{grid-column:2}.pdf-heading h3{font-size:14px}main{padding-left:18px;padding-right:18px}} 
-.pdf-canvas{overflow:auto;background:#e8edf4;padding:12px}.pdf-canvas canvas{display:block;max-width:100%;margin:0 auto 16px;background:white;box-shadow:0 2px 8px #19243a22}
+/* Workspace layout: flexible tracks prevent long content from widening cards. */
+.top {
+  height: auto;
+  min-height: 80px;
+  gap: 20px;
+  padding-block: 16px;
+  flex-wrap: wrap;
+}
+.top nav {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-left: auto;
+}
+.top nav a {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 44px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+.top nav a:hover { background: #f1f5fc; color: var(--link); }
+.top nav a[aria-current="page"] { background: #eaf1fd; color: var(--link); }
+.nav-icon { display: none; flex: none; }
+main { max-width: 1160px; }
+main > * + .box,main > * + .workspace-grid { margin-top: 24px; }
+main > .box + .box { margin-top: 24px; }
+.workspace-grid {
+  display: grid;
+  grid-template-columns: repeat(2,minmax(0,1fr));
+  gap: 24px;
+  align-items: start;
+}
+.workspace-grid .box { margin-top: 0; }
+.box,.fields > *,.workspace-grid > *,.pdf-heading > *,.quote-line > *,.form-option > span {
+  min-width: 0;
+}
+.box { line-height: 1.6; overflow-wrap: anywhere; }
+.box h2 { font-size: 21px; line-height: 1.3; letter-spacing: -.035em; }
+.box h3 { font-size: 17px; line-height: 1.4; margin: 0 0 8px; }
+.box > h2 + *, .box > p + *, .box > small + *, .box > .fields,
+#presentation-form > div + div,#auth-form > div + div { margin-top: 20px; }
+.box > p,.pdf-card p { color: var(--muted); line-height: 1.6; }
+.box > small,.pdf-card > small { display: block; color: var(--muted); }
+.fields { min-width: 0; gap: 20px; }
+/* Two fields only when the card itself has enough room. */
+.workspace-grid .fields { grid-template-columns: 1fr; }
+.actions { flex-wrap: wrap; margin-top: 24px; }
+.actions > * { max-width: 100%; }
+.primary,.secondary,.start { max-width: 100%; text-align: center; white-space: normal; overflow-wrap: anywhere; }
+input[type="checkbox"] { width: 18px; height: 18px; min-height: 0; margin: 0 6px 0 0; vertical-align: middle; accent-color: var(--brand); }
+input[type="file"] { max-width: 100%; font-size: 14px; }
+input[type="file"]::file-selector-button { border: 0; border-radius: 6px; padding: 8px; margin-right: 8px; color: var(--link); background: #edf3fe; }
+.error,.notice { padding: 14px 16px; border-radius: 10px; margin-block: 16px; overflow-wrap: anywhere; }
+.error { color: #9b1c1c; background: #fff1f1; }
+.notice { color: #145237; background: #edf9f1; }
+.quote-line { display: grid; grid-template-columns: minmax(0,2fr) minmax(0,1fr) auto; gap: 16px; align-items: end; padding: 20px 0; border-bottom: 1px solid var(--border); }
+.quote-line small { display: block; }
+#quote-form > div { margin-block: 20px; }
+#workspace-key textarea { height: 100px; margin-top: 16px; font-family: monospace; overflow-wrap: anywhere; }
+.pdf-heading { gap: 12px; flex-wrap: wrap; }
+.pdf-card { padding-top: 24px; margin-top: 24px; }
+.pdf-card > p:has(button) { display: flex; flex-wrap: wrap; gap: 8px; }
+.pdf-actions { gap: 8px; flex-wrap: wrap; }
+.pdf-card dl { grid-template-columns: repeat(auto-fit,minmax(min(145px,100%),1fr)); }
+.pdf-canvas { overflow: auto; background: #e8edf4; padding: 12px; }
+.pdf-canvas canvas { display: block; max-width: 100%; margin: 0 auto 16px; background: white; box-shadow: 0 2px 8px #19243a22; }
+#pdf-viewer { max-width: calc(100% - 24px); }
+#toast { z-index: 30; width: max-content; max-width: calc(100% - 32px); overflow-wrap: anywhere; }
+.chat .audio { margin-top: 0; padding-block: 16px; }
+.chat #chat-form { margin-top: 16px; }
+.thread { min-width: 0; }
+.ask,.reply { min-width: 0; }
+.audio > div { min-width: 0; max-width: 100%; }
+audio { max-width: 100%; }
+#auth-form { max-width: 560px; }
+
+@media (max-width: 1000px) and (min-width: 761px) {
+  .top { gap: 12px; padding-inline: 24px; }
+  .top nav { order: 3; width: 100%; margin: 0; }
+  .top > .demo { margin-left: auto; }
+}
+
+@media (max-width: 760px) {
+  :root { --dock-space: calc(80px + env(safe-area-inset-bottom,0px)); }
+  html { scroll-padding-bottom: calc(var(--dock-space) + 24px); }
+  body { min-height: 100dvh; }
+  .top { min-height: 68px; padding: 14px 20px; gap: 12px; flex-wrap: nowrap; }
+  .brand { min-width: 0; gap: 8px; }
+  .app-icon { width: 32px; height: 32px; flex: none; }
+  .wordmark { width: clamp(120px,35vw,180px); max-width: 100%; }
+  .top > .demo { margin-left: auto; padding: 5px 10px; font-size: 11px; flex: none; }
+  .top nav {
+    position: fixed;
+    z-index: 20;
+    inset: auto 0 0;
+    margin: 0;
+    min-height: var(--dock-space);
+    padding: 8px max(8px,env(safe-area-inset-right,0px)) calc(8px + env(safe-area-inset-bottom,0px)) max(8px,env(safe-area-inset-left,0px));
+    gap: 4px;
+    flex-wrap: nowrap;
+    background: #fff;
+    border-top: 1px solid var(--border);
+    box-shadow: 0 -6px 24px #203b650a;
+  }
+  .top nav a {
+    flex: 1 1 0;
+    min-width: 0;
+    min-height: 56px;
+    padding: 10px 4px;
+    justify-content: center;
+    border-radius: 12px;
+  }
+  .nav-icon { display: block; }
+  /* Accessible names stay on each link while the mobile dock uses icons. */
+  .nav-label { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  .top nav a[aria-current="page"] { box-shadow: inset 0 -3px var(--brand); }
+  main { padding: 32px 20px calc(var(--dock-space) + 32px); }
+  h1 { font-size: clamp(30px,6vw,42px); letter-spacing: -.05em; line-height: 1.15; }
+  .intro p,.lead { font-size: 15px; line-height: 1.65; }
+  .workspace-grid { grid-template-columns: minmax(0,1fr); gap: 20px; }
+  .box { padding: 22px; border-radius: 18px; }
+  .fields,.paper dl { grid-template-columns: minmax(0,1fr); gap: 18px; }
+  .box h2 { font-size: 20px; }
+  .voice-option { padding: 26px; min-height: 240px; }
+  .option-copy { max-width: 100%; }
+  .option-copy p { max-width: 30ch; }
+  .signal { opacity: .35; inset: 12px 0 auto 60%; }
+  .form-option { padding: 20px; gap: 14px; }
+  .form-option strong { font-size: 18px; }
+  .form-option small { font-size: 13px; }
+  .quote-line { grid-template-columns: minmax(0,1fr) auto; gap: 14px; }
+  .quote-line > :first-child { grid-column: 1/-1; }
+  .quote-line > button { grid-column: 2; }
+  .actions { align-items: stretch; gap: 10px; }
+  .actions > button,.pdf-actions > button,.pdf-card > p > button { flex: 1 1 180px; }
+  .pdf-heading { align-items: flex-start; }
+  .pdf-heading h2 { flex: 1 1 200px; }
+  .pdf-heading h3 { font-size: 17px; }
+  .pdf-heading .demo { max-width: 100%; white-space: normal; }
+  .ask,.reply { max-width: 96%; padding: 12px 14px; }
+  .composer .primary { width: 46px; padding: 10px; flex: none; }
+  #toast { bottom: calc(var(--dock-space) + 12px); }
+  #pdf-viewer { padding: 18px; }
+}
+
+@media (max-width: 380px) {
+  .top { padding-inline: 16px; }
+  main { padding-inline: 16px; }
+  .box { padding: 18px; }
+  .voice-option { padding: 22px; }
+  .form-option { padding: 18px 14px; gap: 10px; }
+  .form-icon { width: 38px; height: 38px; }
+  .actions > button { width: 100%; }
+}
