@@ -7,7 +7,7 @@ function normalize(raw) {
   let params=p.params??{};
   if(typeof params==='string') {try{params=JSON.parse(params);}catch{throw Error('Paramètres JSON invalides.');}}
   if(!params||Array.isArray(params)||typeof params!=='object') throw Error('Paramètres invalides.');
-  if(JSON.stringify(params).length>40000) throw Error('Demande trop volumineuse.');
+  if(JSON.stringify(params).length>(p.command==='settings.save'?500000:40000)) throw Error('Demande trop volumineuse.');
   return {idToken:p.idToken,sessionId:p.sessionId,command:String(p.command||''),params,requestId:String(p.requestId||'')};
 }
 function service(req, rows, token, now=new Date().toISOString()) {
@@ -17,6 +17,8 @@ function service(req, rows, token, now=new Date().toISOString()) {
   const num=(v,min,max,dec=2)=>{if((typeof v!=='number'&&typeof v!=='string')||String(v).trim()===''||!/^\d+(\.\d+)?$/.test(String(v)))throw Error('Nombre requis.');const n=Number(v);if(!Number.isFinite(n)||n<min||n>max||Math.abs(n*10**dec-Math.round(n*10**dec))>1e-6)throw Error('Nombre hors limites.');return n;};
   const events=rows.filter(r=>r.scope===req.scope&&r.payload).sort((a,b)=>Number(a.id)-Number(b.id)).map(r=>{const data=JSON.parse(r.payload);const request=data._request;delete data._request;return {...r,request,data};});
   const latest=kind=>{const m=new Map();for(const e of events.filter(e=>e.kind===kind))m.set(e.entity,e.data);return [...m.values()];};
+  const defaults={revision:0,companyName:'',companyDetails:'',primaryColor:'#3E7CE0',accentColor:'#E9F0FA',logo:'',intro:'',comments:'',footer:''};
+  const settings=latest('settings')[0]||defaults;
   const catalog=latest('catalog'), dossiers=latest('dossier'), quotes=events.filter(e=>e.kind==='quote').map(e=>e.data);
   const headQuotes=()=>quotes.filter(q=>!quotes.some(r=>r.parentToken===q.token));
   const current=q=>headQuotes().filter(r=>r.quoteId===q.quoteId);
@@ -27,8 +29,18 @@ function service(req, rows, token, now=new Date().toISOString()) {
   const one=(list,label)=>{if(list.length!==1)throw Error(list.length?'Plusieurs '+label+' correspondent : précisez l’identifiant.':label+' introuvable dans cet espace.');return list[0];};
   const getDossier=id=>one(dossiers.filter(d=>d.dossierId===id),'Dossier');
   const getQuote=()=>{if(p.token)return one(quotes.filter(q=>q.token===p.token),'Devis');let found=lookup(quotes,p.ref||p.quoteId||p.dossierId,['quoteId','numero','dossierId','clientName']);if(!found.length&&p.ref){const ds=dossiers.filter(d=>[d.nom_client,d.prenom_client,d.clientName,d.dossierId].some(v=>norm(v)===norm(p.ref)));found=quotes.filter(q=>ds.some(d=>d.dossierId===q.dossierId));}if(p.version)found=found.filter(q=>q.version===Number(p.version));else if(!quotes.some(q=>norm(q.numero)===norm(p.ref)))found=found.filter(q=>headQuotes().some(h=>h.token===q.token));return one(found,'Devis');};
-  const isWrite=['catalog.save','catalog.delete','dossier.save','quote.create','quote.revise'].includes(command);
-  if(isWrite){if(!UUID.test(req.requestId))throw Error('requestId UUID obligatoire.');const prior=events.find(e=>e.requestId===req.requestId);if(prior){if(prior.request!==JSON.stringify({command,params:p}))throw Error('requestId déjà utilisé pour une autre opération.');if(prior.kind!==command.split('.')[0])throw Error('requestId déjà utilisé.');return out({replayed:true,[prior.kind==='quote'?'quote':prior.kind==='dossier'?'dossier':'item']:prior.kind==='quote'?decorate(prior.data):prior.data});}}
+  const isWrite=['settings.save','catalog.save','catalog.delete','dossier.save','quote.create','quote.revise'].includes(command);
+  if(isWrite){if(!UUID.test(req.requestId))throw Error('requestId UUID obligatoire.');const prior=events.find(e=>e.requestId===req.requestId);if(prior){if(prior.request!==JSON.stringify({command,params:p}))throw Error('requestId déjà utilisé pour une autre opération.');if(prior.kind!==command.split('.')[0])throw Error('requestId déjà utilisé.');return out({replayed:true,[prior.kind==='quote'?'quote':prior.kind==='settings'?'settings':prior.kind==='dossier'?'dossier':'item']:prior.kind==='quote'?decorate(prior.data):prior.data});}}
+  if(command==='settings.get')return out({settings});
+  if(command==='settings.save'){
+    if(p.revision!==settings.revision)throw Error('Paramètres modifiés entre-temps. Actualisez avant de réessayer.');
+    const next={revision:settings.revision+1};
+    for(const k of ['companyName','companyDetails','intro','comments','footer'])next[k]=clean(p[k]??'',k==='companyName'?160:3000);
+    for(const k of ['primaryColor','accentColor']){if(!/^#[0-9a-f]{6}$/i.test(p[k]||''))throw Error('Couleur hexadécimale invalide.');next[k]=p[k];}
+    const logo=p.logo??'';if(typeof logo!=='string'||logo.length>350000)throw Error('Logo trop volumineux (250 Ko maximum).');
+    if(logo){const m=logo.match(/^data:image\/(png|jpeg);base64,([A-Za-z0-9+/]+={0,2})$/);if(!m)throw Error('Logo PNG ou JPEG requis.');const b=Buffer.from(m[2],'base64');if(b.length>256000||!(m[1]==='png'?b.subarray(0,8).toString('hex')==='89504e470d0a1a0a':b[0]===255&&b[1]===216&&b[2]===255))throw Error('Fichier logo invalide.');}
+    next.logo=logo;return write('settings','company',next,{settings:next});
+  }
   if(command==='catalog.list')return out({items:catalog.filter(x=>!x.deleted)});
   if(command==='catalog.save'||command==='catalog.delete'){
     const old=p.id?one(catalog.filter(c=>c.id===p.id&&!c.deleted),'Désignation'):null;
@@ -84,7 +96,7 @@ function service(req, rows, token, now=new Date().toISOString()) {
     const htCents=lines.reduce((s,l)=>s+l.htCents,0),vatCents=lines.reduce((s,l)=>s+l.vatCents,0);
     const quoteId=old?.quoteId||'DEV-'+now.slice(0,10).replace(/-/g,'')+'-'+token.replace(/-/g,'').slice(0,12).toUpperCase();
     const version=(old?.version||0)+1;
-    const quote={quoteId,numero:quoteId+'-V'+version,token,version,parentToken:old?.token||null,dossierId:client.dossierId,clientName:client.clientName,client:{...client},sessionId:req.sessionId,createdAt:now,lines,htCents,vatCents,ttcCents:htCents+vatCents,status:'brouillon',reason:clean(p.reason||'Création',500)};
+    const quote={presentation:JSON.parse(JSON.stringify(settings)),quoteId,numero:quoteId+'-V'+version,token,version,parentToken:old?.token||null,dossierId:client.dossierId,clientName:client.clientName,client:{...client},sessionId:req.sessionId,createdAt:now,lines,htCents,vatCents,ttcCents:htCents+vatCents,status:'brouillon',reason:clean(p.reason||'Création',500)};
     return write('quote',quoteId,quote,{quote:{...quote,current:true,conflict:false,stale:false}},true);
   }
   throw Error('Commande inconnue.');

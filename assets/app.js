@@ -1,7 +1,7 @@
 'use strict';
 (()=>{
  const main=document.querySelector('main');let page,capture,toastClock;
- const fresh=sessionId=>({sessionId,fields:{},messages:[],draft:'',pending:false,error:'',audio:'idle',transcribed:false,dossiers:[],catalog:[],quotes:[],dossierDraft:{},catalogDraft:{},quoteDraft:{lines:[{catalogId:'',quantity:''}]},busy:false,loading:false,notice:'',history:false});
+ const fresh=sessionId=>({sessionId,fields:{},messages:[],draft:'',pending:false,error:'',audio:'idle',transcribed:false,dossiers:[],catalog:[],quotes:[],dossierDraft:{},catalogDraft:{},quoteDraft:{lines:[{catalogId:'',quantity:''}]},busy:false,loading:false,notice:'',history:false,presentationDraft:{}});
   const sessionKey = 'cognalys.conversation';
   const sessionUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
   let useHistoryFallback = false;
@@ -46,7 +46,7 @@
   if(!account.ready||!account.user||!account.access?.authorized){main.innerHTML=Views.login(account,s);document.title='Connexion · Cognalys Intelligence';return;}
   const hash=location.hash.slice(1)||'accueil';page=hash==='verification'?'formulaire':hash;
   if(page!=='conversation')cancelCapture();
-  const views={accueil:Views.home,conversation:Views.conversation,formulaire:Views.dossiers,dossiers:Views.dossiers,parametres:Views.settings,devis:Views.composer,'devis-pdf':x=>'<h1>Devis PDF</h1>'+Views.status(x)+'<section class="box">'+Views.pdfPanel(x)+'</section>',espace:Views.workspace};
+  const views={accueil:Views.home,conversation:Views.conversation,formulaire:Views.dossiers,dossiers:Views.dossiers,parametres:Views.settings,devis:Views.composer,'devis-pdf':x=>'<h1>Devis PDF</h1>'+Views.status(x)+'<section class="box">'+Views.pdfPanel(x)+'</section>',espace:Views.settings};
   main.innerHTML=(views[page]||Views.home)(s);
   if(page==='conversation')main.insertAdjacentHTML('beforeend','<button class="reset" data-act="new-chat" '+(s.pending?'disabled':'')+'>Nouvelle conversation</button><section class="box">'+Views.pdfPanel(s)+'</section>');
   document.title=(main.querySelector('h1')?.textContent||'Cognalys')+' · Cognalys Intelligence';if(focus){window.scrollTo(0,0);main.focus({preventScroll:true});}
@@ -54,7 +54,7 @@
  async function reload(){
   if(!CognalysAuth.state.access?.authorized)return;
   const chat=s;chat.loading=true;render();
-  try{const [d,c,q]=await Promise.all([QuoteAPI.call(chat.sessionId,'dossier.list'),QuoteAPI.call(chat.sessionId,'catalog.list'),QuoteAPI.call(chat.sessionId,'quote.list',{history:true})]);if(s!==chat)return;chat.dossiers=d.dossiers;chat.catalog=c.items;chat.quotes=q.quotes;}
+  try{const [d,c,q,p]=await Promise.all([QuoteAPI.call(chat.sessionId,'dossier.list'),QuoteAPI.call(chat.sessionId,'catalog.list'),QuoteAPI.call(chat.sessionId,'quote.list',{history:true}),QuoteAPI.call(chat.sessionId,'settings.get')]);if(s!==chat)return;chat.dossiers=d.dossiers;chat.catalog=c.items;chat.quotes=q.quotes;chat.presentationDraft={...p.settings};}
   catch(e){if(s===chat)chat.error='Lecture du serveur impossible : '+e.message;}
   finally{if(s===chat){chat.loading=false;render();}}
  }
@@ -181,9 +181,9 @@
 
  function newConversation(){cancelCapture();for(const url of new Set([s.clip?.url,...s.messages.map(m=>m.audioUrl)]))if(url)URL.revokeObjectURL(url);QuotePDF.closePreview();s=fresh(startSession(true));render();reload();}
  window.addEventListener('pagehide',cancelCapture);
- function captureFields(){const f=main.querySelector('#dossier-form');if(f)Object.assign(s.dossierDraft,Object.fromEntries(new FormData(f)));const c=main.querySelector('#catalog-form');if(c){Object.assign(s.catalogDraft,Object.fromEntries(new FormData(c)));s.catalogDraft.active=c.elements.active.checked;}const q=main.querySelector('#quote-form');if(q){if(q.elements.dossierId)s.quoteDraft.dossierId=q.elements.dossierId.value;s.quoteDraft.reason=q.elements.reason.value;for(const [i,l] of s.quoteDraft.lines.entries()){if(!l.lineId)l.catalogId=q.elements['catalog-'+i].value;l.quantity=q.elements['quantity-'+i].value;}}}
+ function captureFields(){const pf=main.querySelector('#presentation-form');if(pf)Object.assign(s.presentationDraft,Object.fromEntries(new FormData(pf)));const f=main.querySelector('#dossier-form');if(f)Object.assign(s.dossierDraft,Object.fromEntries(new FormData(f)));const c=main.querySelector('#catalog-form');if(c){Object.assign(s.catalogDraft,Object.fromEntries(new FormData(c)));s.catalogDraft.active=c.elements.active.checked;}const q=main.querySelector('#quote-form');if(q){if(q.elements.dossierId)s.quoteDraft.dossierId=q.elements.dossierId.value;s.quoteDraft.reason=q.elements.reason.value;for(const [i,l] of s.quoteDraft.lines.entries()){if(!l.lineId)l.catalogId=q.elements['catalog-'+i].value;l.quantity=q.elements['quantity-'+i].value;}}}
  document.addEventListener('input',e=>{if(e.target.id==='answer')s.draft=e.target.value;else captureFields();});
- document.addEventListener('change',e=>{if(e.target.id==='history-toggle'){s.history=e.target.checked;render();}else captureFields();});
+ document.addEventListener('change',async e=>{if(e.target.id==='company-logo'){const file=e.target.files[0];if(!file)return;captureFields();try{if(!['image/png','image/jpeg'].includes(file.type)||file.size>256000)throw Error('Choisissez un logo PNG ou JPEG de 250 Ko maximum.');const data=await new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result);reader.onerror=()=>reject(Error('Lecture du logo impossible.'));reader.readAsDataURL(file);});s.presentationDraft.logo=data;s.error='';}catch(err){s.error=err.message;}render();return;}if(e.target.id==='history-toggle'){s.history=e.target.checked;render();}else captureFields();});
  document.addEventListener('click',e=>{
   if(e.target.closest('.skip')){e.preventDefault();main.focus();return;}
   const el=e.target.closest('button');if(!el||s.busy)return;
@@ -195,6 +195,7 @@
   if(el.dataset.revise){const q=s.quotes.find(q=>q.token===el.dataset.revise);s.quoteDraft={token:q.token,lines:q.lines.map(l=>({...l})),reason:''};go('devis');return;}
   if(el.dataset.removeLine!==undefined){captureFields();s.quoteDraft.lines.splice(Number(el.dataset.removeLine),1);render();return;}
   switch(el.dataset.act){
+   case 'remove-logo':captureFields();s.presentationDraft.logo='';render();break;
    case 'logout':CognalysAuth.logout().catch(e=>{s.error=e.message;render();});break;
    case 'check-access':CognalysAuth.check();break;
    case 'auth-mode':s.signup=!s.signup;s.error='';render();break;
@@ -214,6 +215,7 @@
   if(!CognalysAuth.state.access?.authorized)return;
   if(f.id==='chat-form'){const text=f.elements.answer.value.trim();if(text)sendMessage(text,s.clip);return;}
   captureFields();
+  if(f.id==='presentation-form')operation(async()=>{const result=await QuoteAPI.call(s.sessionId,'settings.save',s.presentationDraft);s.presentationDraft={...result.settings};s.notice='Présentation enregistrée par le serveur.';});
   if(f.id==='dossier-form')operation(async()=>{const d=s.dossierDraft;const fields=Object.fromEntries(['nom_client','prenom_client','prestation','surface','adresse_chantier','adresse_facturation','frequence','notes'].map(k=>[k,d[k]||'']));const result=await QuoteAPI.call(s.sessionId,'dossier.save',{dossierId:d.dossierId,revision:d.revision,fields});s.dossierDraft=result.dossier;s.notice='Dossier enregistré par le serveur.';await reload();});
   if(f.id==='catalog-form')operation(async()=>{const c=s.catalogDraft;const result=await QuoteAPI.call(s.sessionId,'catalog.save',{...c,price:Number(c.price),vat:Number(c.vat)});s.catalogDraft=result.item;s.notice='Désignation enregistrée par le serveur.';await reload();});
   if(f.id==='quote-form')operation(async()=>{const d=s.quoteDraft,old=s.quotes.find(q=>q.token===d.token);const params=old?{token:old.token,quantities:d.lines.filter(l=>l.lineId).map(l=>({lineId:l.lineId,quantity:Number(l.quantity)})),removeLineIds:old.lines.filter(l=>!d.lines.some(x=>x.lineId===l.lineId)).map(l=>l.lineId),addLines:d.lines.filter(l=>!l.lineId).map(l=>({catalogId:l.catalogId,quantity:Number(l.quantity)})),reason:d.reason||'Correction demandée'}:{dossierId:d.dossierId,lines:d.lines.map(l=>({catalogId:l.catalogId,quantity:Number(l.quantity)})),reason:d.reason||'Création'};
