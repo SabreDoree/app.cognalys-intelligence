@@ -1,7 +1,7 @@
 'use strict';
 (()=>{
  const main=document.querySelector('main');let page,capture,toastClock;
- const fresh=sessionId=>({sessionId,fields:{},messages:[],draft:'',pending:false,error:'',audio:'idle',transcribed:false,dossiers:[],catalog:[],quotes:[],dossierDraft:{},catalogDraft:{},quoteDraft:{lines:[{catalogId:'',quantity:''}]},busy:false,loading:false,notice:'',history:false,members:[],presentationDraft:{}});
+ const fresh=sessionId=>({sessionId,fields:{},messages:[],draft:'',pending:false,error:'',audio:'idle',transcribed:false,dossiers:[],catalog:[],quotes:[],dossierDraft:{},catalogDraft:{},quoteDraft:{lines:[{catalogId:'',quantity:''}]},busy:false,loading:false,notice:'',history:false,selectedVersions:{},members:[],presentationDraft:{}});
   const sessionKey = 'cognalys.conversation';
   const sessionUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
   let useHistoryFallback = false;
@@ -189,9 +189,9 @@
 
  function newConversation(){cancelCapture();for(const url of new Set([s.clip?.url,...s.messages.map(m=>m.audioUrl)]))if(url)URL.revokeObjectURL(url);QuotePDF.closePreview();s=fresh(startSession(true));render();reload();}
  window.addEventListener('pagehide',cancelCapture);
- function captureFields(){const pf=main.querySelector('#presentation-form');if(pf)Object.assign(s.presentationDraft,Object.fromEntries(new FormData(pf)));const f=main.querySelector('#dossier-form');if(f)Object.assign(s.dossierDraft,Object.fromEntries(new FormData(f)));const c=main.querySelector('#catalog-form');if(c){Object.assign(s.catalogDraft,Object.fromEntries(new FormData(c)));s.catalogDraft.active=c.elements.active.checked;}const q=main.querySelector('#quote-form');if(q){if(q.elements.dossierId)s.quoteDraft.dossierId=q.elements.dossierId.value;s.quoteDraft.reason=q.elements.reason.value;for(const [i,l] of s.quoteDraft.lines.entries()){if(!l.lineId)l.catalogId=q.elements['catalog-'+i].value;l.quantity=q.elements['quantity-'+i].value;}}}
+ function captureFields(){const pf=main.querySelector('#presentation-form');if(pf)Object.assign(s.presentationDraft,Object.fromEntries(new FormData(pf)));const f=main.querySelector('#dossier-form');if(f)Object.assign(s.dossierDraft,Object.fromEntries(new FormData(f)));const c=main.querySelector('#catalog-form');if(c){Object.assign(s.catalogDraft,Object.fromEntries(new FormData(c)));s.catalogDraft.active=c.elements.active.checked;}const q=main.querySelector('#quote-form');if(q){if(q.elements.dossierId)s.quoteDraft.dossierId=q.elements.dossierId.value;s.quoteDraft.reason=q.elements.reason.value;if(s.quoteDraft.client)for(const k of Object.keys(s.quoteDraft.client)){const el=q.elements['client-'+k];if(el)s.quoteDraft.client[k]=el.value;}for(const [i,l] of s.quoteDraft.lines.entries()){if(!l.lineId)l.catalogId=q.elements['catalog-'+i].value;l.quantity=q.elements['quantity-'+i].value;if(l.lineId)for(const k of ['label','description','unit','price','vat'])l[k]=q.elements[k+'-'+i].value;}}}
  document.addEventListener('input',e=>{if(e.target.id==='answer')s.draft=e.target.value;else captureFields();});
- document.addEventListener('change',async e=>{if(e.target.id==='company-logo'){const state=s;const file=e.target.files[0];if(!file)return;captureFields();try{if(!['image/png','image/jpeg'].includes(file.type)||file.size>256000)throw Error('Choisissez un logo PNG ou JPEG de 250 Ko maximum.');const data=await new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result);reader.onerror=()=>reject(Error('Lecture du logo impossible.'));reader.readAsDataURL(file);});if(s!==state)return;state.presentationDraft.logo=data;state.error='';}catch(err){if(s!==state)return;state.error=err.message;}render();return;}if(e.target.id==='history-toggle'){s.history=e.target.checked;render();}else captureFields();});
+ document.addEventListener('change',async e=>{if(e.target.dataset.quoteVersion){s.selectedVersions[e.target.dataset.quoteVersion]=e.target.value;render();return;}if(e.target.id==='company-logo'){const state=s;const file=e.target.files[0];if(!file)return;captureFields();try{if(!['image/png','image/jpeg'].includes(file.type)||file.size>256000)throw Error('Choisissez un logo PNG ou JPEG de 250 Ko maximum.');const data=await new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result);reader.onerror=()=>reject(Error('Lecture du logo impossible.'));reader.readAsDataURL(file);});if(s!==state)return;state.presentationDraft.logo=data;state.error='';}catch(err){if(s!==state)return;state.error=err.message;}render();return;}if(e.target.id==='history-toggle'){s.history=e.target.checked;render();}else captureFields();});
  document.addEventListener('click',e=>{
   if(e.target.closest('.skip')){e.preventDefault();main.focus();return;}
   const el=e.target.closest('button');if(!el||s.busy)return;
@@ -201,7 +201,7 @@
   if(el.dataset.editCatalog){s.catalogDraft={...s.catalog.find(c=>c.id===el.dataset.editCatalog)};render();return;}
   if(el.dataset.deleteCatalog){const c=s.catalog.find(c=>c.id===el.dataset.deleteCatalog);operation(async()=>{await QuoteAPI.call(s.sessionId,'catalog.delete',{id:c.id,revision:c.revision});s.notice='Suppression confirmée par le serveur.';if(s.catalogDraft.id===c.id)s.catalogDraft={};await reload();});return;}
   if(el.dataset.compose){s.quoteDraft={dossierId:el.dataset.compose,lines:[{catalogId:'',quantity:''}]};go('devis');return;}
-  if(el.dataset.revise){const q=s.quotes.find(q=>q.token===el.dataset.revise);s.quoteDraft={token:q.token,lines:q.lines.map(l=>({...l})),reason:''};go('devis');return;}
+  if(el.dataset.revise){const q=s.quotes.find(q=>q.token===el.dataset.revise);s.quoteDraft={token:q.token,client:Object.fromEntries(['prenom_client','nom_client','email_client','telephone_client','prestation','surface','frequence','adresse_chantier','adresse_facturation','notes'].map(k=>[k,q.client[k]||''])),lines:q.lines.map(l=>({...l})),reason:''};go('devis');return;}
   if(el.dataset.removeLine!==undefined){captureFields();s.quoteDraft.lines.splice(Number(el.dataset.removeLine),1);render();return;}
   switch(el.dataset.act){
    case 'remove-logo':captureFields();s.presentationDraft.logo='';render();break;
@@ -228,7 +228,7 @@
   if(f.id==='presentation-form')operation(async()=>{const result=await QuoteAPI.call(s.sessionId,'settings.save',s.presentationDraft);s.presentationDraft={...result.settings};s.notice='Présentation enregistrée par le serveur.';});
   if(f.id==='dossier-form')operation(async()=>{const d=s.dossierDraft;const fields=Object.fromEntries(['nom_client','prenom_client','prestation','surface','adresse_chantier','adresse_facturation','frequence','notes'].map(k=>[k,d[k]||'']));const result=await QuoteAPI.call(s.sessionId,'dossier.save',{dossierId:d.dossierId,revision:d.revision,fields});s.dossierDraft=result.dossier;s.notice='Dossier enregistré par le serveur.';await reload();});
   if(f.id==='catalog-form')operation(async()=>{const c=s.catalogDraft;const result=await QuoteAPI.call(s.sessionId,'catalog.save',{...c,price:Number(c.price),vat:Number(c.vat)});s.catalogDraft=result.item;s.notice='Désignation enregistrée par le serveur.';await reload();});
-  if(f.id==='quote-form')operation(async()=>{const d=s.quoteDraft,old=s.quotes.find(q=>q.token===d.token);const params=old?{token:old.token,quantities:d.lines.filter(l=>l.lineId).map(l=>({lineId:l.lineId,quantity:Number(l.quantity)})),removeLineIds:old.lines.filter(l=>!d.lines.some(x=>x.lineId===l.lineId)).map(l=>l.lineId),addLines:d.lines.filter(l=>!l.lineId).map(l=>({catalogId:l.catalogId,quantity:Number(l.quantity)})),reason:d.reason||'Correction demandée'}:{dossierId:d.dossierId,lines:d.lines.map(l=>({catalogId:l.catalogId,quantity:Number(l.quantity)})),reason:d.reason||'Création'};
+  if(f.id==='quote-form')operation(async()=>{const d=s.quoteDraft,old=s.quotes.find(q=>q.token===d.token);const params=old?{token:old.token,clientFields:d.client,lineChanges:d.lines.filter(l=>l.lineId).map(l=>({lineId:l.lineId,label:l.label,description:l.description,unit:l.unit,price:Number(l.price),vat:Number(l.vat)})),quantities:d.lines.filter(l=>l.lineId).map(l=>({lineId:l.lineId,quantity:Number(l.quantity)})),removeLineIds:old.lines.filter(l=>!d.lines.some(x=>x.lineId===l.lineId)).map(l=>l.lineId),addLines:d.lines.filter(l=>!l.lineId).map(l=>({catalogId:l.catalogId,quantity:Number(l.quantity)})),reason:d.reason||'Correction demandée'}:{dossierId:d.dossierId,lines:d.lines.map(l=>({catalogId:l.catalogId,quantity:Number(l.quantity)})),reason:d.reason||'Création'};
    const result=await QuoteAPI.call(s.sessionId,old?'quote.revise':'quote.create',params);s.notice='PDF confirmé : '+result.quote.numero;s.quoteDraft={lines:[{catalogId:'',quantity:''}]};await reload();go('devis-pdf');await QuotePDF.action(s.sessionId,result.quote,'preview');});
  });
  window.addEventListener('hashchange',()=>{syncHistorySession(s.sessionId);s.notice='';QuotePDF.closePreview();render(true);if(page==='administration')reloadAdmin();});
@@ -240,6 +240,7 @@
  });
  render();
 })();
+
 
 
 

@@ -1,0 +1,12 @@
+const {test}=require('node:test'),assert=require('node:assert/strict'),vm=require('node:vm'),fs=require('node:fs');
+test('ouvrir une correction depuis un dossier, saisir plusieurs champs et envoyer la nouvelle version',async()=>{
+ const handlers={},calls=[],pdf=[];let task;const quote={token:'q2',numero:'DEV-V2',client:{nom_client:'Test',prenom_client:'Avant',prestation:'Vitres',adresse_facturation:''},lines:[{lineId:'l',label:'Vitres',description:'',unit:'m²',quantity:2,price:3,vat:20}]};
+ const state={sessionId:'session',quotes:[quote],quoteDraft:{},selectedVersions:{},dossiers:[],catalog:[]};let form;
+ const ctx={s:state,document:{addEventListener:(name,handler)=>handlers[name]=handler},main:{querySelector:selector=>selector==='#quote-form'?form:null},FormData:class{constructor(){}},CognalysAuth:{state:{access:{authorized:true}}},render(){},go(hash){calls.push(hash);},operation(job){task=job();},reload:async()=>{},QuoteAPI:{call:async(...args)=>{calls.push(args);return {quote:{...quote,numero:'DEV-V3'}};}},QuotePDF:{action:async(...args)=>pdf.push(args)}};
+ const code=fs.readFileSync(__dirname+'/../assets/app.js','utf8');vm.createContext(ctx);vm.runInContext(code.slice(code.indexOf(' function captureFields()'),code.indexOf(" window.addEventListener('hashchange'")),ctx);
+ handlers.click({target:{closest:selector=>selector==='button'?{dataset:{revise:'q2'}}:null}});assert.equal(calls[0],'devis');assert.equal(state.quoteDraft.client.prenom_client,'Avant');
+ const elements={reason:{value:'Correction complète'}};for(const [k,v] of Object.entries(state.quoteDraft.client))elements['client-'+k]={value:v};elements['client-prenom_client'].value='Après';elements['client-adresse_facturation'].value='10 rue du Test';
+ for(const k of ['label','description','unit','price','vat','quantity'])elements[k+'-0']={value:String(quote.lines[0][k])};elements['price-0'].value='8';form={id:'quote-form',elements};
+ handlers.submit({preventDefault(){},target:form});await task;const request=calls.find(Array.isArray);assert.equal(request[1],'quote.revise');assert.equal(request[2].clientFields.prenom_client,'Après');assert.equal(request[2].clientFields.adresse_facturation,'10 rue du Test');assert.equal(request[2].lineChanges[0].price,8);assert.equal(quote.client.prenom_client,'Avant');assert.equal(quote.lines[0].price,3);assert.equal(pdf.length,1);
+ handlers.change({target:{dataset:{quoteVersion:'DEV'},value:'q1'}});assert.equal(state.selectedVersions.DEV,'q1');
+});

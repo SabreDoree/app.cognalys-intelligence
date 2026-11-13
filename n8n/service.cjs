@@ -99,8 +99,18 @@ function service(req, rows, token, now=new Date().toISOString()) {
   if(command==='quote.find') {const quote=decorate(getQuote());return out({quote});}
   if(command==='quote.create'||command==='quote.revise'){
     const old=command==='quote.revise'?getQuote():null;
+    if(old?.documentType==='estimate')throw Error('Créez un devis depuis le dossier client pour chiffrer cette estimation.');
     if(old&&(!decorate(old).current||decorate(old).conflict)){const heads=current(old);return {result:{ok:false,error:'Version ancienne ou ambiguë. Relire quote.find avec le quoteId sans suffixe de version avant correction.',quoteId:old.quoteId,currentQuote:heads.length===1?decorate(heads[0]):null},write:false,pdf:false};}
-    const client=getDossier(old?.dossierId||p.dossierId);
+    const dossier=getDossier(old?.dossierId||p.dossierId);
+    const client={...(old&&old.client.revision===dossier.revision?old.client:dossier)};
+    if(p.clientFields!==undefined){
+      if(!old||!p.clientFields||Array.isArray(p.clientFields)||typeof p.clientFields!=='object')throw Error('Corrections client invalides.');
+      const allowed=['nom_client','prenom_client','email_client','telephone_client','prestation','surface','adresse_chantier','adresse_facturation','frequence','notes'];
+      for(const key of Object.keys(p.clientFields)){if(!allowed.includes(key))throw Error('Champ client inconnu : '+key);client[key]=clean(p.clientFields[key],key==='notes'?2000:1000);}
+      if(!client.nom_client||!client.prestation)throw Error('Nom et prestation requis.');
+      if(client.email_client&&!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(client.email_client))throw Error('E-mail client invalide.');
+      client.clientName=[client.prenom_client,client.nom_client].filter(Boolean).join(' ');
+    }
     if(old&&(old.presentation?.vatMode||'standard')!==(settings.vatMode||'standard'))throw Error('Le régime de TVA a changé : créez un nouveau devis pour recalculer toutes ses lignes.');
     let lines;
     const makeLine=(l,index)=>{
@@ -114,6 +124,20 @@ function service(req, rows, token, now=new Date().toISOString()) {
       lines=old.lines.map(l=>({...l}));
       if(p.quantities){for(const change of p.quantities){const l=one(lines.filter(l=>l.lineId===change.lineId),'Ligne');l.quantity=num(change.quantity,0.001,1000000,3);l.htCents=Math.round(Math.round(l.quantity*1000)*Math.round(l.price*100)/1000);l.vatCents=Math.round(l.htCents*Math.round(l.vat*100)/10000);}}
       if(p.removeLineIds){if(!Array.isArray(p.removeLineIds))throw Error('Liste de lignes invalide.');for(const id of p.removeLineIds)one(lines.filter(l=>l.lineId===id),'Ligne');lines=lines.filter(l=>!p.removeLineIds.includes(l.lineId));}
+      if(p.lineChanges){
+        if(!Array.isArray(p.lineChanges))throw Error('Corrections de lignes invalides.');
+        for(const change of p.lineChanges){
+          const l=one(lines.filter(l=>l.lineId===change.lineId),'Ligne');
+          for(const [key,max] of [['label',160],['description',1000],['unit',30]])if(Object.hasOwn(change,key))l[key]=clean(change[key],max);
+          if(!l.label||!l.unit)throw Error('Désignation et unité requises.');
+          if(Object.hasOwn(change,'price'))l.price=num(change.price,0,1000000);
+          if(Object.hasOwn(change,'vat'))l.vat=num(change.vat,0,100);
+          if(settings.vatMode==='franchise'&&l.vat!==0)throw Error('La franchise de TVA impose un taux nul.');
+          l.htCents=Math.round(Math.round(l.quantity*1000)*Math.round(l.price*100)/1000);
+          if(l.htCents>100000000000)throw Error('Montant de ligne trop élevé.');
+          l.vatCents=Math.round(l.htCents*Math.round(l.vat*100)/10000);
+        }
+      }
       if(p.addLines){if(!Array.isArray(p.addLines))throw Error('Lignes invalides.');lines.push(...p.addLines.map(makeLine));}
     }else{if(!Array.isArray(p.lines))throw Error('Sélectionnez les désignations et quantités.');lines=p.lines.map(makeLine);}
     if(!lines.length||lines.length>50)throw Error('Le devis doit comporter entre 1 et 50 lignes chiffrées.');
