@@ -917,3 +917,89 @@ audio { max-width: 100%; }
   .form-icon { width: 38px; height: 38px; }
   .actions > button { width: 100%; }
 }
+
+/* Persistent app controls share the desktop header and the mobile navigation. */
+.top { max-width: 1440px; gap: 12px; padding-inline: clamp(20px,3vw,44px); }
+.app-tools { display: flex; align-items: center; gap: 8px; }
+.chrome-button,.mobile-reload {
+  display: inline-flex; align-items: center; justify-content: center; gap: 7px;
+  min-height: 44px; border: 1px solid var(--border); border-radius: 10px;
+  padding: 10px 12px; color: var(--ink); background: #fff;
+  font-size: 13px; font-weight: 600; white-space: nowrap;
+}
+.chrome-button:hover { background: #edf3fe; }
+.chrome-button svg,.mobile-reload svg { flex: none; }
+.mobile-reload { display: none; }
+@media (min-width: 761px) {
+  body > header { position: sticky; top: 0; z-index: 15; }
+}
+.theme-moon { display: none; }
+:root[data-theme="light"] .theme-sun { display: none; }
+:root[data-theme="light"] .theme-moon { display: block; }
+
+:root[data-theme="dark"] {
+  color-scheme: dark; color: #e5edf8; background: #0d1421;
+  --brand: #72a8ff; --link: #9ac1ff; --ink: #e5edf8;
+  --muted: #a8b6ca; --border: #304058;
+  --surface: #151f30; --surface-raised: #1c2a40;
+}
+:root[data-theme="dark"] header,
+:root[data-theme="dark"] .top nav,
+:root[data-theme="dark"] .box,
+:root[data-theme="dark"] .form-option,
+:root[data-theme="dark"] .secondary,
+:root[data-theme="dark"] .chrome-button,
+:root[data-theme="dark"] .mobile-reload,
+:root[data-theme="dark"] .skip,
+:root[data-theme="dark"] #pdf-viewer { background: var(--surface); }
+:root[data-theme="dark"] .wordmark { filter: brightness(0) invert(1); }
+:root[data-theme="dark"] .voice-option { background: linear-gradient(112deg,#2455a3,#356dc7 85%); }
+:root[data-theme="dark"] .start { background: #edf3fe; color: #214b8a; }
+:root[data-theme="dark"] .demo { background: #20314c; border-color: var(--border); color: #b8d2ff; }
+:root[data-theme="dark"] .form-icon,
+:root[data-theme="dark"] .total { background: #203553; color: #b8d2ff; }
+:root[data-theme="dark"] .secondary { border-color: var(--border); }
+:root[data-theme="dark"] .secondary:hover,
+:root[data-theme="dark"] .chrome-button:hover,
+:root[data-theme="dark"] .top nav a:hover { background: #243552; color: var(--link); }
+:root[data-theme="dark"] .top nav a[aria-current="page"] { background: #203553; }
+:root[data-theme="dark"] label,
+:root[data-theme="dark"] dt { color: #b7c5d9; }
+:root[data-theme="dark"] input,
+:root[data-theme="dark"] select,
+:root[data-theme="dark"] textarea { background: #101a2a; border-color: #40516b; }
+:root[data-theme="dark"] input::placeholder,
+:root[data-theme="dark"] textarea::placeholder { color: #91a1b8; opacity: 1; }
+:root[data-theme="dark"] input[type="file"]::file-selector-button { background: #243552; }
+:root[data-theme="dark"] .ask { background: var(--surface-raised); }
+:root[data-theme="dark"] .reply { background: #243e62; color: #e0edff; }
+:root[data-theme="dark"] .ask .chat-yellow { color: #ffd376; }
+:root[data-theme="dark"] .ask .chat-green { color: #70dfaa; }
+:root[data-theme="dark"] .ask .chat-red { color: #ff9ca5; }
+:root[data-theme="dark"] .ask .chat-code { background: #101a2a; border-color: var(--border); color: #c3d5ef; }
+:root[data-theme="dark"] .notice { background: #173b30; color: #9de7bf; }
+:root[data-theme="dark"] .error { background: #45242e; color: #ffc0c5; }
+:root[data-theme="dark"] #pdf-panel [role="alert"] { color: #ffc0c5; }
+:root[data-theme="dark"] .pdf-canvas { background: #0d1421; }
+:root[data-theme="dark"] :is(a,button,input,select,textarea):focus-visible { outline-color: #8ab5ff; }
+:root[data-theme="dark"] ::selection { background: #315888; color: #fff; }
+
+@media (min-width: 761px) and (max-width: 1200px) {
+  .top nav { order: 3; width: 100%; margin: 0; }
+  .app-tools { margin-left: auto; }
+  .top > .demo { margin-left: 0; }
+}
+@media (max-width: 760px) {
+  .top { padding-inline: 16px; }
+  .top > .demo,.desktop-reload { display: none; }
+  .app-tools { margin-left: auto; flex: none; }
+  .chrome-button { padding: 10px; font-size: 12px; }
+  .mobile-reload {
+    display: flex; flex: 1 1 0; flex-direction: column; gap: 4px;
+    min-width: 0; min-height: 56px; padding: 6px 2px;
+    border: 0; border-radius: 12px; font-size: 10px; color: var(--muted);
+  }
+  .mobile-reload:hover { color: var(--link); background: #edf3fe; }
+  :root[data-theme="dark"] .mobile-reload:hover { background: #243552; }
+}
+
