@@ -28,7 +28,8 @@ function service(req, rows, token, now=new Date().toISOString()) {
   const catalog=latest('catalog'), dossiers=latest('dossier'), quotes=events.filter(e=>e.kind==='quote').map(e=>e.data);
   const headQuotes=()=>quotes.filter(q=>!quotes.some(r=>r.parentToken===q.token));
   const current=q=>headQuotes().filter(r=>r.quoteId===q.quoteId);
-  const decorate=q=>({...q,current:current(q).some(x=>x.token===q.token),conflict:current(q).length>1,stale:dossiers.find(d=>d.dossierId===q.dossierId)?.revision!==q.client.revision});
+  const quoteLines=q=>q.lines.map((line,index)=>({...line,lineId:line.lineId||q.token+'-'+index}));
+  const decorate=q=>({...q,lines:quoteLines(q),current:current(q).some(x=>x.token===q.token),conflict:current(q).length>1,stale:dossiers.find(d=>d.dossierId===q.dossierId)?.revision!==q.client.revision});
   const out=result=>({result:{ok:true,...result},write:false,pdf:false});
   const write=(kind,entity,data,result,pdf=false)=>({result:{ok:true,...result},write:true,pdf,event:{scope:req.scope,kind,entity,requestId:req.requestId,payload:JSON.stringify({...data,_request:JSON.stringify({command,params:p})})}});
   const lookup=(list,ref,fields)=>list.filter(r=>fields.some(f=>norm(r[f])&&norm(r[f])===norm(ref)));
@@ -99,9 +100,9 @@ function service(req, rows, token, now=new Date().toISOString()) {
   if(command==='quote.find') {const quote=decorate(getQuote());return out({quote});}
   if(command==='quote.create'||command==='quote.revise'){
     const old=command==='quote.revise'?getQuote():null;
-    if(old?.documentType==='estimate')throw Error('Créez un devis depuis le dossier client pour chiffrer cette estimation.');
     if(old&&(!decorate(old).current||decorate(old).conflict)){const heads=current(old);return {result:{ok:false,error:'Version ancienne ou ambiguë. Relire quote.find avec le quoteId sans suffixe de version avant correction.',quoteId:old.quoteId,currentQuote:heads.length===1?decorate(heads[0]):null},write:false,pdf:false};}
     const dossier=getDossier(old?.dossierId||p.dossierId);
+    const presentation=old?.documentType==='estimate'?{...old.presentation}:settings;
     const client={...(old&&old.client.revision===dossier.revision?old.client:dossier)};
     if(p.clientFields!==undefined){
       if(!old||!p.clientFields||Array.isArray(p.clientFields)||typeof p.clientFields!=='object')throw Error('Corrections client invalides.');
@@ -111,17 +112,17 @@ function service(req, rows, token, now=new Date().toISOString()) {
       if(client.email_client&&!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(client.email_client))throw Error('E-mail client invalide.');
       client.clientName=[client.prenom_client,client.nom_client].filter(Boolean).join(' ');
     }
-    if(old&&(old.presentation?.vatMode||'standard')!==(settings.vatMode||'standard'))throw Error('Le régime de TVA a changé : créez un nouveau devis pour recalculer toutes ses lignes.');
+    if(old&&(old.presentation?.vatMode||'standard')!==(presentation.vatMode||'standard'))throw Error('Le régime de TVA a changé : créez un nouveau devis pour recalculer toutes ses lignes.');
     let lines;
     const makeLine=(l,index)=>{
       const c=one(catalog.filter(c=>c.id===l.catalogId&&!c.deleted&&c.active),'Désignation active');
-      const quantity=num(l.quantity,0.001,1000000,3),price=c.price,vat=settings.vatMode==='franchise'?0:c.vat;
+      const quantity=num(l.quantity,0.001,1000000,3),price=c.price,vat=presentation.vatMode==='franchise'?0:c.vat;
       const ht=Math.round(Math.round(quantity*1000)*Math.round(price*100)/1000),tax=Math.round(ht*Math.round(vat*100)/10000);
       if(ht>100000000000)throw Error('Montant de ligne trop élevé.');
       return {lineId:token+'-'+index,catalogId:c.id,catalogRevision:c.revision,label:c.label,description:c.description,unit:c.unit,quantity,price,vat,htCents:ht,vatCents:tax};
     };
     if(old){
-      lines=old.lines.map(l=>({...l}));
+      lines=quoteLines(old);
       if(p.quantities){for(const change of p.quantities){const l=one(lines.filter(l=>l.lineId===change.lineId),'Ligne');l.quantity=num(change.quantity,0.001,1000000,3);l.htCents=Math.round(Math.round(l.quantity*1000)*Math.round(l.price*100)/1000);l.vatCents=Math.round(l.htCents*Math.round(l.vat*100)/10000);}}
       if(p.removeLineIds){if(!Array.isArray(p.removeLineIds))throw Error('Liste de lignes invalide.');for(const id of p.removeLineIds)one(lines.filter(l=>l.lineId===id),'Ligne');lines=lines.filter(l=>!p.removeLineIds.includes(l.lineId));}
       if(p.lineChanges){
@@ -132,7 +133,7 @@ function service(req, rows, token, now=new Date().toISOString()) {
           if(!l.label||!l.unit)throw Error('Désignation et unité requises.');
           if(Object.hasOwn(change,'price'))l.price=num(change.price,0,1000000);
           if(Object.hasOwn(change,'vat'))l.vat=num(change.vat,0,100);
-          if(settings.vatMode==='franchise'&&l.vat!==0)throw Error('La franchise de TVA impose un taux nul.');
+          if(presentation.vatMode==='franchise'&&l.vat!==0)throw Error('La franchise de TVA impose un taux nul.');
           l.htCents=Math.round(Math.round(l.quantity*1000)*Math.round(l.price*100)/1000);
           if(l.htCents>100000000000)throw Error('Montant de ligne trop élevé.');
           l.vatCents=Math.round(l.htCents*Math.round(l.vat*100)/10000);
@@ -141,12 +142,14 @@ function service(req, rows, token, now=new Date().toISOString()) {
       if(p.addLines){if(!Array.isArray(p.addLines))throw Error('Lignes invalides.');lines.push(...p.addLines.map(makeLine));}
     }else{if(!Array.isArray(p.lines))throw Error('Sélectionnez les désignations et quantités.');lines=p.lines.map(makeLine);}
     if(!lines.length||lines.length>50)throw Error('Le devis doit comporter entre 1 et 50 lignes chiffrées.');
+    for(const line of lines){num(line.quantity,0.001,1000000,3);if(!Number.isFinite(line.htCents)||!Number.isFinite(line.vatCents))throw Error('Complétez les quantités et les montants avant de créer une nouvelle version.');}
     const htCents=lines.reduce((s,l)=>s+l.htCents,0),vatCents=lines.reduce((s,l)=>s+l.vatCents,0);
     const quoteId=old?.quoteId||'DEV-'+now.slice(0,10).replace(/-/g,'')+'-'+token.replace(/-/g,'').slice(0,12).toUpperCase();
     const version=(old?.version||0)+1;
-    const quote={missingInformation:legalWarnings(settings,client),validUntil:new Date(new Date(now).getTime()+(settings.validityDays||30)*86400000).toISOString(),presentation:JSON.parse(JSON.stringify(settings)),quoteId,numero:quoteId+'-V'+version,token,version,parentToken:old?.token||null,dossierId:client.dossierId,clientName:client.clientName,client:{...client},sessionId:req.sessionId,createdAt:now,lines,htCents,vatCents,ttcCents:htCents+vatCents,status:'brouillon',reason:clean(p.reason||'Création',500)};
+    const quote={...(old?.documentType==='estimate'?{documentType:'estimate',title:old.title,source:old.source||'formulaire-clair-soin'}:{}),missingInformation:legalWarnings(presentation,client),validUntil:new Date(new Date(now).getTime()+(presentation.validityDays||30)*86400000).toISOString(),presentation:JSON.parse(JSON.stringify(presentation)),quoteId,numero:quoteId+'-V'+version,token,version,parentToken:old?.token||null,dossierId:client.dossierId,clientName:client.clientName,client:{...client},sessionId:req.sessionId,createdAt:now,lines,htCents,vatCents,ttcCents:htCents+vatCents,status:'brouillon',reason:clean(p.reason||'Création',500)};
     return write('quote',quoteId,quote,{quote:{...quote,current:true,conflict:false,stale:false}},true);
   }
   throw Error('Commande inconnue.');
 }
 module.exports={normalize,service,legalWarnings};
+

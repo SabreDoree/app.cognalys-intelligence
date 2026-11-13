@@ -100,7 +100,7 @@ const Views = (() => {
       ${s.clip ? `<p role="status">${s.audio === 'transcribing' ? 'Transcription de votre note en cours…' : s.pending ? 'Transcription envoyée à l’assistant…' : s.transcribed ? 'Envoi interrompu. Corrigez le texte et réessayez.' : 'Écrivez votre message ou réessayez la transcription.'}</p>` : ''}<form id="chat-form"><label for="answer">${s.clip?'Transcription ou précisions':'Votre réponse'}</label><div class="composer"><input id="answer" name="answer" placeholder="${s.clip?'Ajoutez ou corrigez le texte…':'Écrivez votre réponse…'}" required value="${esc(s.draft)}" ${busy?'disabled':''}><button class="primary" ${busy?'disabled':''} aria-label="${s.clip?'Envoyer la note vocale':'Envoyer la réponse'}">${icon('send',19)}</button></div></form>
       </section>`;
   }
-  const money=n=>new Intl.NumberFormat('fr-FR',{style:'currency',currency:'EUR'}).format(n/100);
+  const money=n=>n==null?'À chiffrer':new Intl.NumberFormat('fr-FR',{style:'currency',currency:'EUR'}).format(n/100);
   const input=(name,label,value='',type='text',extra='')=>`<div><label for="${name}">${label}</label><input id="${name}" name="${name}" type="${type}" value="${esc(value)}" ${extra}></div>`;
   const select=(name,label,options)=>`<div><label for="${name}">${label}</label><select id="${name}" name="${name}">${options}</select></div>`;
   const clientFields=['prenom_client','nom_client','email_client','telephone_client','prestation','surface','frequence','adresse_chantier','adresse_facturation','notes'];
@@ -129,7 +129,7 @@ const Views = (() => {
       versions.sort((a,b)=>b.version-a.version||String(b.createdAt).localeCompare(String(a.createdAt)));
       const q=versions.find(q=>q.token===s.selectedVersions?.[id])||versions.find(q=>q.current)||versions[0];
       const head=versions.find(q=>q.current&&!q.conflict);
-      return `<article class="pdf-card"><div class="pdf-heading"><h3>${esc(id)}</h3><span class="demo">${q.conflict?'Conflit à résoudre':q.current?'Version actuelle':'Version antérieure'}</span></div><label>Version du document<select data-quote-version="${esc(id)}">${versions.map(v=>`<option value="${esc(v.token)}" ${v.token===q.token?'selected':''}>Version ${esc(v.version)} · ${esc(new Date(v.createdAt).toLocaleString('fr-FR'))}${v.current?' · actuelle':''}</option>`).join('')}</select></label><p><strong>${esc(q.clientName)}</strong> · ${money(q.htCents)} HT · ${money(q.ttcCents)} TTC</p><p>${q.lines.map(l=>esc(l.label)+' × '+l.quantity).join(' · ')}</p><small>${esc(new Date(q.createdAt).toLocaleString('fr-FR'))} · Brouillon</small>${q.stale?'<p class="notice">Le dossier a changé depuis ce PDF.</p>':''}<div class="pdf-actions"><button class="secondary" data-pdf="preview" data-token="${esc(q.token)}" ${s.busy?'disabled':''}>Prévisualiser</button><button class="secondary" data-pdf="download" data-token="${esc(q.token)}" ${s.busy?'disabled':''}>Télécharger</button>${head?(head.documentType==='estimate'?`<button class="secondary" data-compose="${esc(head.dossierId)}">Créer un devis depuis cette estimation</button>`:`<button class="secondary" data-revise="${esc(head.token)}">Corriger · nouvelle version${q.token!==head.token?' depuis la version actuelle':''}</button>`):''}</div></article>`;
+      return `<article class="pdf-card"><div class="pdf-heading"><h3>${esc(id)}</h3><span class="demo">${q.conflict?'Conflit à résoudre':q.current?'Version actuelle':'Version antérieure'}</span></div><label>Version du document<select data-quote-version="${esc(id)}">${versions.map(v=>`<option value="${esc(v.token)}" ${v.token===q.token?'selected':''}>Version ${esc(v.version)} · ${esc(new Date(v.createdAt).toLocaleString('fr-FR'))}${v.current?' · actuelle':''}</option>`).join('')}</select></label><p><strong>${esc(q.clientName)}</strong> · ${money(q.htCents)} HT · ${money(q.ttcCents)} TTC</p><p>${q.lines.map(l=>esc(l.label)+' × '+l.quantity).join(' · ')}</p><small>${esc(new Date(q.createdAt).toLocaleString('fr-FR'))} · Brouillon${q.documentType==='estimate'?' · Reçu du formulaire':''}</small>${q.stale?'<p class="notice">Le dossier a changé depuis ce PDF.</p>':''}<div class="pdf-actions"><button class="secondary" data-pdf="preview" data-token="${esc(q.token)}" ${s.busy?'disabled':''}>Prévisualiser</button><button class="secondary" data-pdf="download" data-token="${esc(q.token)}" ${s.busy?'disabled':''}>Télécharger</button>${head?`<button class="secondary" data-revise="${esc(head.token)}">Corriger · nouvelle version${q.token!==head.token?' depuis la version actuelle':''}</button>`:''}</div></article>`;
     }).join('')+(groups.size?'':'<p>Aucun devis enregistré.</p>');
   }
   function login(a,s){
@@ -144,5 +144,6 @@ const Views = (() => {
   }
   return {home,conversation,dossiers,settings,composer,pdfPanel,workspace,status,login,administration};
 })();
+
 
 
