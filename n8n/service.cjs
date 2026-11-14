@@ -18,6 +18,9 @@ function legalWarnings(p,client={}){
 }
 function service(req, rows, token, now=new Date().toISOString()) {
   const p=req.params, command=req.command;
+  const role=req.actor?.role||'manager';
+  if(role==='viewer'&&!['settings.get','catalog.list','dossier.list','dossier.search','quote.list','quote.find','audit.list'].includes(command))throw Error('Votre accès est en lecture seule.');
+  if(role!=='manager'&&['settings.save','catalog.save','catalog.delete'].includes(command))throw Error('Action réservée au responsable de l’entreprise.');
   const clean=(v,max=1000)=>{if(typeof v!=='string'||v.length>max)throw Error('Texte invalide ou trop long.');return v.trim();};
   const norm=v=>String(v??'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().trim().replace(/\s+/g,' ');
   const num=(v,min,max,dec=2)=>{if((typeof v!=='number'&&typeof v!=='string')||String(v).trim()===''||!/^\d+(\.\d+)?$/.test(String(v)))throw Error('Nombre requis.');const n=Number(v);if(!Number.isFinite(n)||n<min||n>max||Math.abs(n*10**dec-Math.round(n*10**dec))>1e-6)throw Error('Nombre hors limites.');return n;};
@@ -31,11 +34,25 @@ function service(req, rows, token, now=new Date().toISOString()) {
   const quoteLines=q=>q.lines.map((line,index)=>({...line,lineId:line.lineId||q.token+'-'+index}));
   const decorate=q=>({...q,lines:quoteLines(q),current:current(q).some(x=>x.token===q.token),conflict:current(q).length>1,stale:dossiers.find(d=>d.dossierId===q.dossierId)?.revision!==q.client.revision});
   const out=result=>({result:{ok:true,...result},write:false,pdf:false});
-  const write=(kind,entity,data,result,pdf=false)=>({result:{ok:true,...result},write:true,pdf,event:{scope:req.scope,kind,entity,requestId:req.requestId,payload:JSON.stringify({...data,_request:JSON.stringify({command,params:p})})}});
+  const write=(kind,entity,data,result,pdf=false)=>({result:{ok:true,...result},write:true,pdf,event:{scope:req.scope,kind,entity,requestId:req.requestId,payload:JSON.stringify({...data,_audit:{action:command,actorUid:req.actor?.uid||null,actorEmail:req.actor?.email||'',source:req.source||'app',createdAt:now,entity,version:data.version||data.revision||null},_request:JSON.stringify({command,params:p})})}});
+  if(command==='audit.list')return out({events:events.filter(e=>!p.entity||e.entity===p.entity).filter(e=>e.data._audit).map(e=>({...e.data._audit,eventId:e.id})).reverse().slice(0,200)});
   const lookup=(list,ref,fields)=>list.filter(r=>fields.some(f=>norm(r[f])&&norm(r[f])===norm(ref)));
   const one=(list,label)=>{if(list.length!==1)throw Error(list.length?'Plusieurs '+label+' correspondent : précisez l’identifiant.':label+' introuvable dans cet espace.');return list[0];};
   const getDossier=id=>one(dossiers.filter(d=>d.dossierId===id),'Dossier');
   const getQuote=()=>{if(p.token)return one(quotes.filter(q=>q.token===p.token),'Devis');let found=lookup(quotes,p.ref||p.quoteId||p.dossierId,['quoteId','numero','dossierId','clientName']);if(!found.length&&p.ref){const ds=dossiers.filter(d=>[d.nom_client,d.prenom_client,d.clientName,d.dossierId].some(v=>norm(v)===norm(p.ref)));found=quotes.filter(q=>ds.some(d=>d.dossierId===q.dossierId));}if(p.version)found=found.filter(q=>q.version===Number(p.version));else if(!quotes.some(q=>norm(q.numero)===norm(p.ref)))found=found.filter(q=>headQuotes().some(h=>h.token===q.token));return one(found,'Devis');};
+  if(command==='quote.send'){
+    if(req.source!=='app'||p.confirm!==true)throw Error('Confirmez l’envoi depuis la fenêtre de l’application.');
+    if(!UUID.test(req.requestId))throw Error('Identifiant d’envoi requis.');
+    const quote=getQuote();if(!UUID.test(quote.token))throw Error('Jeton PDF invalide.');
+    const to=clean(p.to,254),subject=clean(p.subject,200),message=clean(p.message,8000);
+    if(!/^[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/.test(to)||/[\r\n]/.test(subject)||!subject||!message)throw Error('Destinataire, objet ou message invalide.');
+    const signature=JSON.stringify({token:quote.token,to,subject,message});
+    const prior=events.filter(e=>e.requestId===req.requestId);
+    if(prior.length){if(prior.some(e=>e.data.signature!==signature))throw Error('Identifiant d’envoi déjà utilisé pour une autre opération.');const result=prior.findLast(e=>e.kind==='mail_result');return out({delivery:result?result.data.status:'unknown',replayed:true});}
+    const audit={action:'quote.send_requested',actorUid:req.actor?.uid,actorEmail:req.actor?.email,source:'app',createdAt:now,entity:quote.quoteId,version:quote.version};
+    const payload={signature,to,subject,message,token:quote.token,numero:quote.numero,_audit:audit};
+    return {write:false,pdf:false,mail:true,result:{ok:true},mailPlan:payload,claimEvent:{scope:req.scope,kind:'mail_claim',entity:quote.quoteId,requestId:req.requestId,payload:JSON.stringify(payload)}};
+  }
   const isWrite=['settings.save','catalog.save','catalog.delete','dossier.save','quote.create','quote.revise'].includes(command);
   if(isWrite){if(!UUID.test(req.requestId))throw Error('requestId UUID obligatoire.');const prior=events.find(e=>e.requestId===req.requestId);if(prior){if(prior.request!==JSON.stringify({command,params:p}))throw Error('requestId déjà utilisé pour une autre opération.');if(prior.kind!==command.split('.')[0])throw Error('requestId déjà utilisé.');return out({replayed:true,[prior.kind==='quote'?'quote':prior.kind==='settings'?'settings':prior.kind==='dossier'?'dossier':'item']:prior.kind==='quote'?decorate(prior.data):prior.data});}}
   if(command==='settings.get')return out({settings});

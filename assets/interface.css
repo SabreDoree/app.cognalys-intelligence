@@ -1018,3 +1018,7 @@ audio { max-width: 100%; }
 .company-dialog-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 12px; margin-top: 28px; }
 :root[data-theme="dark"] .company-dialog-icon { background: #203553; color: #b8d2ff; }
 @media (max-width: 480px) { #company-link-dialog { padding: 20px; } .company-dialog-actions > button { flex: 1 1 100%; } .company-dialog-heading h2 { font-size: 20px; } }
+#send-quote-dialog { width: min(600px,calc(100vw - 32px)); max-height: calc(100dvh - 48px); padding: 24px; border: 1px solid var(--border); border-radius: 18px; background: var(--surface,#fff); color: var(--ink); overflow-y: auto; }
+#send-quote-dialog::backdrop { background: #091325aa; }
+#send-quote-dialog label { display: block; margin-top: 16px; }
+#send-quote-dialog textarea,#send-quote-dialog input { width: 100%; }

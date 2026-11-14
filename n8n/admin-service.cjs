@@ -9,7 +9,7 @@ function adminService(actor,req,rows,newScope){
  const byScope=new Map();
  for(const r of [...visible,...records])if(validScope(r.scope))byScope.set(r.scope,{scope:r.scope,company:r.company||'Entreprise sans nom',memberCount:visible.filter(m=>m.scope===r.scope&&m.active===true).length});
  const companies=[...byScope.values()].sort((a,b)=>a.company.localeCompare(b.company,'fr'));
- const clean=r=>({uid:r.uid,email:r.email||'',scope:r.scope||'',company:byScope.get(r.scope)?.company||r.company||'',active:r.active===true,status:r.status||(r.active?'approved':r.scope?'suspended':'pending'),updatedAt:r.updatedAt,createdAt:r.createdAt});
+ const clean=r=>({uid:r.uid,email:r.email||'',scope:r.scope||'',role:r.role||'manager',company:byScope.get(r.scope)?.company||r.company||'',active:r.active===true,status:r.status||(r.active?'approved':r.scope?'suspended':'pending'),updatedAt:r.updatedAt,createdAt:r.createdAt});
  if(req.command==='admin.list')return {write:false,result:{ok:true,members:visible.map(clean).sort((a,b)=>String(a.createdAt).localeCompare(String(b.createdAt))),companies}};
  const p=req.params||{};
  if(req.command==='admin.company_create'){
@@ -23,7 +23,7 @@ function adminService(actor,req,rows,newScope){
  if(p.uid===OWNER)return fail('Le compte propriétaire ne peut pas être désactivé ici.');
  const found=members.filter(r=>r.uid===p.uid);if(found.length!==1)return fail('Compte absent ou en doublon. Actualisez la liste.');
  const old=found[0];if(p.updatedAt!==old.updatedAt)return fail('Ce compte a changé. Actualisez avant de réessayer.');
- let status,active,scope=old.scope||'',company=old.company||'';
+ let status=old.status,active=old.active===true,scope=old.scope||'',company=old.company||'',role=old.role||'manager';
  if(req.command==='admin.approve'||req.command==='admin.reactivate'||req.command==='admin.link'){
    if(Object.hasOwn(p,'scope')){
      const target=validScope(p.scope)?byScope.get(p.scope):null;
@@ -37,10 +37,11 @@ function adminService(actor,req,rows,newScope){
    }
    status='approved';active=true;
  }
+ else if(req.command==='admin.role'){if(!['manager','member','viewer'].includes(p.role))return fail('Rôle invalide.');role=p.role;}
  else if(req.command==='admin.suspend'){status='suspended';active=false;}
  else if(req.command==='admin.reject'){status='rejected';active=false;}
  else return fail('Action administrative inconnue.');
- return {write:true,rowId:old.id,expectedUpdatedAt:old.updatedAt,uid:old.uid,email:old.email||'',scope,company,status,active,result:{ok:true,member:{...clean(old),scope,status,active,company}}};
+ return {write:true,rowId:old.id,expectedUpdatedAt:old.updatedAt,uid:old.uid,email:old.email||'',scope,company,role,status,active,result:{ok:true,member:{...clean(old),scope,status,active,company,role}}};
 }
 
 module.exports={adminService};

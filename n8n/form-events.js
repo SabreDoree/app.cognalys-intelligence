@@ -1,6 +1,6 @@
 const { scope } = $('Vérifier l’espace du formulaire').first().json;
 const { dossier, quote } = $('Préparer l’estimation').first().json;
-const event = (kind, entity, record) => ({ json: { scope, kind, entity, requestId: '', payload: JSON.stringify(record) } });
+const event = (kind, entity, record) => ({ json: { scope, kind, entity, requestId: '', payload: JSON.stringify({...record,_audit:{action:kind==='quote'?'quote.create':'dossier.save',actorUid:null,actorEmail:'',source:'formulaire',createdAt:quote.createdAt,entity,version:record.version||record.revision}}) } });
 if (quote.ttcCents === null) {
   dossier.notes = ('Chiffrage à confirmer.\n' + dossier.notes).slice(0, 2000);
 }

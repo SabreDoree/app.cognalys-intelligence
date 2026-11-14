@@ -1,5 +1,17 @@
 # Cognalys Intelligence — Démonstration de devis V2
 
+## Espaces entreprise — mise à jour du 15 novembre 2026
+
+L’administration ouvre une fiche par entreprise avec ses membres, leur statut et leur rôle. Trois rôles sont vérifiés côté serveur sur chaque appel : Responsable (manager), Collaborateur (member : dossiers et devis, sans modification du catalogue ni de la présentation), Lecture seule (viewer). Les anciennes adhésions sans rôle restent responsables pour préserver les accès ; les nouvelles inscriptions deviennent collaborateurs après activation. L’administrateur Cognalys attribue les rôles.
+
+Les brouillons de saisie sont conservés sept jours dans localStorage, séparément par UID et espace. Ils sont supprimés à la déconnexion explicite. Ils ne sont pas synchronisés entre appareils. Un stockage indisponible empêche leur sauvegarde. Les révisions restaurées restent soumises aux refus de données obsolètes du serveur.
+
+Les nouvelles mutations métier embarquent un événement _audit avec l’acteur authentifié, le canal imposé côté serveur, la date et la version. Le formulaire public indique son origine sans attribuer un utilisateur connecté. Le bouton Historique lit ces événements ; les anciennes actions ne sont pas reconstruites.
+
+Le bouton Envoyer par e-mail ouvre une fenêtre avec le destinataire, le message, la version du PDF et une prévisualisation. L’envoi exige une confirmation explicite dans l’application ; le chat ne peut pas l’effectuer. Il réutilise le SMTP Cognalys existant et son adresse d’expédition affichée. Le fichier privé est retrouvé dans l’espace authentifié et son en-tête PDF vérifié avant SMTP. Un identifiant de demande réserve l’envoi ; la première réservation insérée est seule éligible. Une acceptation SMTP n’est pas une preuve de livraison finale. En cas d’échec ou interruption, le résultat reste inconnu et aucun renvoi automatique n’est effectué. Consulter l’historique avant de préparer un nouvel envoi.
+
+Le fichier n8n/team-upgrade.json décrit les opérations appliquées aux versions actuelles ; les exports historiques complets ne doivent pas être réimportés sans comparaison avec les workflows actifs.
+
 Application statique HTML/CSS/JavaScript. Le chat, le formulaire dossiers, le catalogue et les devis utilisent le même service métier n8n. Aucun email, facture ou validation simulée.
 
 ## Utilisation
