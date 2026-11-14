@@ -23,7 +23,7 @@ function adminService(actor,req,rows,newScope){
  if(p.uid===OWNER)return fail('Le compte propriétaire ne peut pas être désactivé ici.');
  const found=members.filter(r=>r.uid===p.uid);if(found.length!==1)return fail('Compte absent ou en doublon. Actualisez la liste.');
  const old=found[0];if(p.updatedAt!==old.updatedAt)return fail('Ce compte a changé. Actualisez avant de réessayer.');
- let status=old.status,active=old.active===true,scope=old.scope||'',company=old.company||'',role=old.role||'manager';
+ let status=old.status||(old.active?'approved':old.scope?'suspended':'pending'),active=old.active===true,scope=old.scope||'',company=old.company||'',role=old.role||'manager';
  if(req.command==='admin.approve'||req.command==='admin.reactivate'||req.command==='admin.link'){
    if(Object.hasOwn(p,'scope')){
      const target=validScope(p.scope)?byScope.get(p.scope):null;

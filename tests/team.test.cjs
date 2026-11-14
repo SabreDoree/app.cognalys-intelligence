@@ -1,6 +1,10 @@
 const {test}=require('node:test'),assert=require('node:assert/strict'),crypto=require('node:crypto'),vm=require('node:vm'),fs=require('node:fs');
 const {service}=require('../n8n/service.cjs');
 const scope='a'.repeat(64),actor=uid=>({uid,email:uid+'@example.invalid',role:'manager'});
+test('un ancien compte actif sans statut accepte un rôle en gardant un statut explicite',()=>{
+ const {adminService}=require('../n8n/admin-service.cjs');const owner={uid:'TJFfqZBnzyfgpZRNmKGDwWnUltP2',authorized:true};
+ const r=adminService(owner,{web:true,command:'admin.role',params:{uid:'old',updatedAt:'v1',role:'viewer'}},[{id:1,uid:'old',scope,active:true,updatedAt:'v1'}],'b'.repeat(64));assert.equal(r.role,'viewer');assert.equal(r.status,'approved');assert.equal(r.active,true);
+});
 test('réservation concurrente : seul le premier identifiant inséré peut envoyer',()=>{
  const ops=require('../n8n/team-upgrade.json').api;const code=ops.find(o=>o.node?.name==='Élire réservation').node.parameters.jsCode;
  const rows=[{id:11,kind:'mail_claim'},{id:12,kind:'mail_claim'}];
