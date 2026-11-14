@@ -8,14 +8,15 @@
   <title>Créer un devis · Cognalys Intelligence</title>
   <link rel="icon" type="image/svg+xml" href="./assets/brand.svg?v=e854f9ba2f">
   <link rel="apple-touch-icon" href="./assets/icone-1024.png?v=4ffc2523f4">
-  <link rel="stylesheet" href="./assets/interface.css?v=theme-20261113">
+  <link rel="stylesheet" href="./assets/interface.css?v=company-dialog-20261114">
   <script defer src="./assets/icons.js?v=aee5ff1397"></script>
   <script defer src="./assets/demo-data.js?v=3e95bfd549"></script>
   <script defer src="./assets/auth.js?v=admin-legal-20261111"></script>
   <script defer src="./assets/api.js?v=admin-legal-20261111"></script>
-  <script defer src="./assets/views.js?v=company-members-fix-20261114"></script>
+  <script defer src="./assets/views.js?v=company-dialog-20261114"></script>
+  <script defer src="./assets/company-link.js?v=company-dialog-20261114"></script>
   <script defer src="./assets/pdf.js?v=v2-20261111"></script>
-  <script defer src="./assets/app.js?v=company-members-fix-20261114"></script>
+  <script defer src="./assets/app.js?v=company-dialog-20261114"></script>
 </head>
 <body>
   <a class="skip" href="#principal">Aller au contenu</a>
@@ -25,6 +26,10 @@
     <div class="pdf-heading"><h2 id="pdf-title">Aperçu du devis</h2><button class="secondary" type="button" autofocus>Fermer</button></div>
     <div class="pdf-canvas"></div>
     <a class="secondary" target="_blank" rel="noopener noreferrer">Ouvrir dans un nouvel onglet</a>
+  </dialog>
+  <dialog id="company-link-dialog" aria-labelledby="company-link-title">
+    <div class="company-dialog-heading"><span class="company-dialog-icon" aria-hidden="true">↔</span><h2 id="company-link-title">Rattacher une entreprise</h2></div>
+    <div data-company-content></div>
   </dialog>
   <div id="toast" role="status"></div>
   <noscript>Activez JavaScript pour tester la création de devis.</noscript>

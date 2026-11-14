@@ -195,7 +195,8 @@
  document.addEventListener('click',e=>{
   if(e.target.closest('.skip')){e.preventDefault();main.focus();return;}
   const el=e.target.closest('button');if(!el||s.busy)return;
-  if(el.dataset.adminAction){if(!CognalysAuth.state.access?.isAdmin)return;const m=s.members.find(m=>m.uid===el.dataset.uid);if(!m)return;const card=el.closest('[data-member]');const select=card.querySelector('[data-company-scope]');const companyInput=card.querySelector('[data-company-name]');const scope=select?.value||'';const company=companyInput?.value.trim()||m.company;operation(async()=>{await QuoteAPI.call(s.sessionId,'admin.'+el.dataset.adminAction,{uid:m.uid,updatedAt:m.updatedAt,company,scope});s.notice='Rattachement d’entreprise confirmé par le serveur.';await reloadAdmin();});return;}
+  if(el.dataset.companyLink){if(!CognalysAuth.state.access?.isAdmin)return;const m=s.members.find(m=>m.uid===el.dataset.companyLink);if(!m)return;const state=s;CompanyLink.open({member:m,companies:s.companies||[],sessionId:s.sessionId,onSaved:async()=>{if(s!==state)return;state.notice='Entreprise rattachée avec succès.';await reloadAdmin();main.querySelector('[data-company-link="'+CSS.escape(m.uid)+'"]')?.focus();}});return;}
+  if(el.dataset.adminAction){if(!CognalysAuth.state.access?.isAdmin)return;const m=s.members.find(m=>m.uid===el.dataset.uid);if(!m)return;operation(async()=>{await QuoteAPI.call(s.sessionId,'admin.'+el.dataset.adminAction,{uid:m.uid,updatedAt:m.updatedAt});s.notice='Modification d’accès confirmée par le serveur.';await reloadAdmin();});return;}
   if(el.dataset.pdf){const q=s.quotes.find(q=>q.token===el.dataset.token);if(q)operation(()=>QuotePDF.action(s.sessionId,q,el.dataset.pdf));return;}
   if(el.dataset.editDossier){s.dossierDraft={...s.dossiers.find(d=>d.dossierId===el.dataset.editDossier)};render();return;}
   if(el.dataset.editCatalog){s.catalogDraft={...s.catalog.find(c=>c.id===el.dataset.editCatalog)};render();return;}
