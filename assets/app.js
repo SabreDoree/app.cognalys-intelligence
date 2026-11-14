@@ -225,7 +225,7 @@
   if(!CognalysAuth.state.access?.authorized)return;
   if(f.id==='chat-form'){const text=f.elements.answer.value.trim();if(text)sendMessage(text,s.clip);return;}
   captureFields();
-  if(f.id==='company-form')operation(async()=>{const company=f.elements['new-company'].value.trim();await QuoteAPI.call(s.sessionId,'admin.company_create',{company});s.notice='Entreprise créée. Vous pouvez maintenant y rattacher des comptes.';await reloadAdmin();});
+  if(f.id==='company-form'){const company=f.elements['new-company'].value.trim();operation(async()=>{await QuoteAPI.call(s.sessionId,'admin.company_create',{company});s.notice='Entreprise créée. Vous pouvez maintenant y rattacher des comptes.';await reloadAdmin();});}
   if(f.id==='presentation-form')operation(async()=>{const result=await QuoteAPI.call(s.sessionId,'settings.save',s.presentationDraft);s.presentationDraft={...result.settings};s.notice='Présentation enregistrée par le serveur.';});
   if(f.id==='dossier-form')operation(async()=>{const d=s.dossierDraft;const fields=Object.fromEntries(['nom_client','prenom_client','prestation','surface','adresse_chantier','adresse_facturation','frequence','notes'].map(k=>[k,d[k]||'']));const result=await QuoteAPI.call(s.sessionId,'dossier.save',{dossierId:d.dossierId,revision:d.revision,fields});s.dossierDraft=result.dossier;s.notice='Dossier enregistré par le serveur.';await reload();});
   if(f.id==='catalog-form')operation(async()=>{const c=s.catalogDraft;const result=await QuoteAPI.call(s.sessionId,'catalog.save',{...c,price:Number(c.price),vat:Number(c.vat)});s.catalogDraft=result.item;s.notice='Désignation enregistrée par le serveur.';await reload();});

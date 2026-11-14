@@ -1,0 +1,143 @@
+{
+  "workflowId": "DkVsfDUoyZIjCDyh",
+  "operations": [
+    {
+      "type": "updateNodeParameters",
+      "nodeName": "Préparer action admin",
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "function adminService(actor,req,rows,newScope){\n const OWNER='TJFfqZBnzyfgpZRNmKGDwWnUltP2';\n const fail=error=>({write:false,result:{ok:false,error}});\n if(actor.uid!==OWNER||!actor.authorized||!req.web)return fail('Administration réservée au propriétaire.');\n const validScope=value=>typeof value==='string'&&/^[a-f0-9]{64}$/.test(value);\n const members=rows.filter(r=>r.uid&&r.status!=='company');\n const visible=members.filter(r=>r.status!=='archived');\n const records=rows.filter(r=>r.status==='company'&&!r.uid&&validScope(r.scope));\n const byScope=new Map();\n for(const r of [...visible,...records])if(validScope(r.scope))byScope.set(r.scope,{scope:r.scope,company:r.company||'Entreprise sans nom',memberCount:visible.filter(m=>m.scope===r.scope&&m.active===true).length});\n const companies=[...byScope.values()].sort((a,b)=>a.company.localeCompare(b.company,'fr'));\n const clean=r=>({uid:r.uid,email:r.email||'',scope:r.scope||'',company:byScope.get(r.scope)?.company||r.company||'',active:r.active===true,status:r.status||(r.active?'approved':r.scope?'suspended':'pending'),updatedAt:r.updatedAt,createdAt:r.createdAt});\n if(req.command==='admin.list')return {write:false,result:{ok:true,members:visible.map(clean).sort((a,b)=>String(a.createdAt).localeCompare(String(b.createdAt))),companies}};\n const p=req.params||{};\n if(req.command==='admin.company_create'){\n   if(typeof p.company!=='string')return fail('Nom d’entreprise requis.');\n   const name=p.company.trim();\n   if(!name||name.length>160)return fail('Un nom d’entreprise est requis (160 caractères maximum).');\n   if(companies.some(c=>c.company.trim().toLocaleLowerCase('fr')===name.toLocaleLowerCase('fr')))return fail('Cette entreprise existe déjà.');\n   if(!validScope(newScope)||rows.some(r=>r.scope===newScope))return fail('Impossible de créer un espace inédit. Réessayez.');\n   return {write:false,companyCreate:true,companyRow:{uid:'',email:'',scope:newScope,company:name,active:false,status:'company'},result:{ok:true,company:{scope:newScope,company:name,memberCount:0}}};\n }\n if(p.uid===OWNER)return fail('Le compte propriétaire ne peut pas être désactivé ici.');\n const found=members.filter(r=>r.uid===p.uid);if(found.length!==1)return fail('Compte absent ou en doublon. Actualisez la liste.');\n const old=found[0];if(p.updatedAt!==old.updatedAt)return fail('Ce compte a changé. Actualisez avant de réessayer.');\n let status,active,scope=old.scope||'',company=old.company||'';\n if(req.command==='admin.approve'||req.command==='admin.reactivate'||req.command==='admin.link'){\n   if(Object.hasOwn(p,'scope')){\n     const target=validScope(p.scope)?byScope.get(p.scope):null;\n     if(!target)return fail('Sélectionnez une entreprise existante.');\n     scope=target.scope;company=target.company;\n   }else{\n     if(req.command==='admin.link')return fail('Sélectionnez une entreprise existante.');\n     company=String(p.company||company).trim();if(!company||company.length>160)return fail('Un nom d’entreprise est requis (160 caractères maximum).');\n     if(!scope){if(!validScope(newScope)||rows.some(r=>r.scope===newScope))return fail('Impossible de créer l’espace.');scope=newScope;}\n     else company=byScope.get(scope)?.company||company;\n   }\n   status='approved';active=true;\n }\n else if(req.command==='admin.suspend'){status='suspended';active=false;}\n else if(req.command==='admin.reject'){status='rejected';active=false;}\n else return fail('Action administrative inconnue.');\n return {write:true,rowId:old.id,expectedUpdatedAt:old.updatedAt,uid:old.uid,email:old.email||'',scope,company,status,active,result:{ok:true,member:{...clean(old),scope,status,active,company}}};\n}\n\n\nconst req=$('Valider identifiants').first().json;return [{json:adminService($('Contrôler connexion').first().json,{...req,web:$('API demo privée').isExecuted},$('Lire inscriptions').all().map(i=>i.json),$input.first().json.newScope)}];"
+      }
+    },
+    {
+      "type": "updateNodeParameters",
+      "nodeName": "Créer entreprise ?",
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.companyCreate === true && $json.result.ok === true }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      }
+    },
+    {
+      "type": "updateNodeParameters",
+      "nodeName": "Accès confirmé",
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const p=$('Préparer action admin').first().json;const row=$input.first().json;if(row.uid!==p.uid||row.active!==p.active||row.status!==p.status||row.scope!==p.scope||row.company!==p.company)return [{json:{ok:false,error:'Modification non confirmée. Actualisez.'}}];return [{json:{...p.result,member:{...p.result.member,updatedAt:row.updatedAt}}}];"
+      }
+    },
+    {
+      "type": "updateNodeParameters",
+      "nodeName": "Enregistrer accès",
+      "parameters": {
+        "resource": "row",
+        "operation": "update",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "rGN4lPFNidKYXSDq",
+          "cachedResultName": "cognalys_memberships"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "id",
+              "condition": "eq",
+              "keyValue": "={{ $json.rowId }}"
+            },
+            {
+              "keyName": "updatedAt",
+              "condition": "eq",
+              "keyValue": "={{ $json.expectedUpdatedAt }}"
+            }
+          ]
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "schema": [
+            {
+              "id": "uid",
+              "displayName": "uid",
+              "type": "string",
+              "display": true,
+              "required": false
+            },
+            {
+              "id": "email",
+              "displayName": "email",
+              "type": "string",
+              "display": true,
+              "required": false
+            },
+            {
+              "id": "scope",
+              "displayName": "scope",
+              "type": "string",
+              "display": true,
+              "required": false
+            },
+            {
+              "id": "company",
+              "displayName": "company",
+              "type": "string",
+              "display": true,
+              "required": false
+            },
+            {
+              "id": "active",
+              "displayName": "active",
+              "type": "boolean",
+              "display": true,
+              "required": false
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "type": "string",
+              "display": true,
+              "required": false
+            }
+          ],
+          "value": {
+            "uid": "={{ $json.uid }}",
+            "email": "={{ $json.email }}",
+            "scope": "={{ $json.scope }}",
+            "company": "={{ $json.company }}",
+            "active": "={{ $json.active }}",
+            "status": "={{ $json.status }}"
+          }
+        },
+        "options": {}
+      }
+    },
+    {
+      "type": "setNodeSettings",
+      "nodeName": "Nouvel espace aléatoire",
+      "settings": {
+        "executeOnce": true
+      }
+    },
+    {
+      "type": "setNodeSettings",
+      "nodeName": "Enregistrer accès",
+      "settings": {
+        "alwaysOutputData": true
+      }
+    }
+  ]
+}
