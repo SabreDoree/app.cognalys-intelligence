@@ -58,7 +58,7 @@
   if(page==='conversation')main.insertAdjacentHTML('beforeend','<button class="reset" data-act="new-chat" '+(s.pending?'disabled':'')+'>Nouvelle conversation</button><section class="box">'+Views.pdfPanel(s)+'</section>');
   document.title=(main.querySelector('h1')?.textContent||'Cognalys')+' · Cognalys Intelligence';if(focus){window.scrollTo(0,0);main.focus({preventScroll:true});}
  }
- async function reloadAdmin(){if(!CognalysAuth.state.access?.isAdmin)return;const state=s;try{const r=await QuoteAPI.call(state.sessionId,'admin.list');if(s===state){state.members=r.members;render();}}catch(e){if(s===state){state.error=e.message;render();}}}
+ async function reloadAdmin(){if(!CognalysAuth.state.access?.isAdmin)return;const state=s;try{const r=await QuoteAPI.call(state.sessionId,'admin.list');if(s===state){state.members=r.members||[];state.companies=r.companies||[];render();}}catch(e){if(s===state){state.error=e.message;render();}}}
  async function reload(){
   if(!CognalysAuth.state.access?.authorized)return;
   const chat=s;chat.loading=true;render();
@@ -195,7 +195,7 @@
  document.addEventListener('click',e=>{
   if(e.target.closest('.skip')){e.preventDefault();main.focus();return;}
   const el=e.target.closest('button');if(!el||s.busy)return;
-  if(el.dataset.adminAction){if(!CognalysAuth.state.access?.isAdmin)return;const m=s.members.find(m=>m.uid===el.dataset.uid);if(!m)return;const company=el.closest('[data-member]').querySelector('input')?.value||m.company;operation(async()=>{await QuoteAPI.call(s.sessionId,'admin.'+el.dataset.adminAction,{uid:m.uid,updatedAt:m.updatedAt,company});s.notice='Modification d’accès confirmée par le serveur.';await reloadAdmin();});return;}
+  if(el.dataset.adminAction){if(!CognalysAuth.state.access?.isAdmin)return;const m=s.members.find(m=>m.uid===el.dataset.uid);if(!m)return;const card=el.closest('[data-member]');const select=card.querySelector('[data-company-scope]');const companyInput=card.querySelector('[data-company-name]');const scope=select?.value||'';const company=companyInput?.value.trim()||m.company;operation(async()=>{await QuoteAPI.call(s.sessionId,'admin.'+el.dataset.adminAction,{uid:m.uid,updatedAt:m.updatedAt,company,scope});s.notice='Rattachement d’entreprise confirmé par le serveur.';await reloadAdmin();});return;}
   if(el.dataset.pdf){const q=s.quotes.find(q=>q.token===el.dataset.token);if(q)operation(()=>QuotePDF.action(s.sessionId,q,el.dataset.pdf));return;}
   if(el.dataset.editDossier){s.dossierDraft={...s.dossiers.find(d=>d.dossierId===el.dataset.editDossier)};render();return;}
   if(el.dataset.editCatalog){s.catalogDraft={...s.catalog.find(c=>c.id===el.dataset.editCatalog)};render();return;}
