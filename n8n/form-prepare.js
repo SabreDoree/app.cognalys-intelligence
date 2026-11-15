@@ -57,6 +57,8 @@ const dossier = {
   nom_client: demande.nomFamille,
   prenom_client: demande.prenom,
   clientName: demande.nom,
+  email_client: demande.email,
+  telephone_client: demande.telephone,
   prestation: names[demande.projet.service],
   surface: demande.surface === null ? '' : demande.surface + ' m²',
   adresse_chantier: demande.projet.codePostal + ' ' + demande.projet.commune,

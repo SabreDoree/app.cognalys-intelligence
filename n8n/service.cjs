@@ -32,7 +32,14 @@ function service(req, rows, token, now=new Date().toISOString()) {
   const headQuotes=()=>quotes.filter(q=>!quotes.some(r=>r.parentToken===q.token));
   const current=q=>headQuotes().filter(r=>r.quoteId===q.quoteId);
   const quoteLines=q=>q.lines.map((line,index)=>({...line,lineId:line.lineId||q.token+'-'+index}));
-  const decorate=q=>({...q,lines:quoteLines(q),current:current(q).some(x=>x.token===q.token),conflict:current(q).length>1,stale:dossiers.find(d=>d.dossierId===q.dossierId)?.revision!==q.client.revision});
+  const clientEmail=q=>{
+    const dossier=dossiers.find(d=>d.dossierId===q.dossierId);
+    for(const value of [q.client?.email_client,dossier?.email_client])if(typeof value==='string'&&/^[^\s@,;<>]+@[^\s@,;<>]+\.[^\s@,;<>]+$/.test(value.trim()))return value.trim();
+    if(q.source!=='formulaire-clair-soin')return '';
+    const found=[...new Set([q.client?.notes,dossier?.notes].flatMap(notes=>[...String(notes||'').matchAll(/^E-mail\s*:\s*([^\s,;<>]+@[^\s,;<>]+\.[^\s,;<>]+)\s*$/gim)].map(m=>m[1].trim())))];
+    return found.length===1?found[0]:'';
+  };
+  const decorate=q=>({...q,client:{...q.client,email_client:clientEmail(q)},lines:quoteLines(q),current:current(q).some(x=>x.token===q.token),conflict:current(q).length>1,stale:dossiers.find(d=>d.dossierId===q.dossierId)?.revision!==q.client.revision});
   const out=result=>({result:{ok:true,...result},write:false,pdf:false});
   const write=(kind,entity,data,result,pdf=false)=>({result:{ok:true,...result},write:true,pdf,event:{scope:req.scope,kind,entity,requestId:req.requestId,payload:JSON.stringify({...data,_audit:{action:command,actorUid:req.actor?.uid||null,actorEmail:req.actor?.email||'',source:req.source||'app',createdAt:now,entity,version:data.version||data.revision||null},_request:JSON.stringify({command,params:p})})}});
   if(command==='audit.list')return out({events:events.filter(e=>!p.entity||e.entity===p.entity).filter(e=>e.data._audit).map(e=>({...e.data._audit,eventId:e.id})).reverse().slice(0,200)});
@@ -44,13 +51,15 @@ function service(req, rows, token, now=new Date().toISOString()) {
     if(req.source!=='app'||p.confirm!==true)throw Error('Confirmez l’envoi depuis la fenêtre de l’application.');
     if(!UUID.test(req.requestId))throw Error('Identifiant d’envoi requis.');
     const quote=getQuote();if(!UUID.test(quote.token))throw Error('Jeton PDF invalide.');
-    const to=clean(p.to,254),subject=clean(p.subject,200),message=clean(p.message,8000);
+    const to=clean(p.to||clientEmail(quote),254),subject=clean(p.subject,200),message=clean(p.message,8000);
+    const confirmationTo=String(req.actor?.email||'').trim();
+    if(!/^[^\s@,;<>]+@[^\s@,;<>]+\.[^\s@,;<>]+$/.test(confirmationTo))throw Error('Adresse de confirmation de votre compte indisponible. Reconnectez-vous.');
     if(!/^[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/.test(to)||/[\r\n]/.test(subject)||!subject||!message)throw Error('Destinataire, objet ou message invalide.');
     const signature=JSON.stringify({token:quote.token,to,subject,message});
     const prior=events.filter(e=>e.requestId===req.requestId);
-    if(prior.length){if(prior.some(e=>e.data.signature!==signature))throw Error('Identifiant d’envoi déjà utilisé pour une autre opération.');const result=prior.findLast(e=>e.kind==='mail_result');return out({delivery:result?result.data.status:'unknown',replayed:true});}
+    if(prior.length){if(prior.some(e=>e.data.signature!==signature))throw Error('Identifiant d’envoi déjà utilisé pour une autre opération.');const result=prior.findLast(e=>e.kind==='mail_result'),confirmation=prior.findLast(e=>e.kind==='mail_confirmation');return out({delivery:result?result.data.status:'unknown',confirmation:confirmation?confirmation.data.status:'unknown',replayed:true});}
     const audit={action:'quote.send_requested',actorUid:req.actor?.uid,actorEmail:req.actor?.email,source:'app',createdAt:now,entity:quote.quoteId,version:quote.version};
-    const payload={signature,to,subject,message,token:quote.token,numero:quote.numero,_audit:audit};
+    const payload={signature,to,subject,message,confirmationTo,token:quote.token,numero:quote.numero,_audit:audit};
     return {write:false,pdf:false,mail:true,result:{ok:true},mailPlan:payload,claimEvent:{scope:req.scope,kind:'mail_claim',entity:quote.quoteId,requestId:req.requestId,payload:JSON.stringify(payload)}};
   }
   const isWrite=['settings.save','catalog.save','catalog.delete','dossier.save','quote.create','quote.revise'].includes(command);
@@ -103,12 +112,13 @@ function service(req, rows, token, now=new Date().toISOString()) {
   if(command==='dossier.save'){
     const old=p.dossierId?getDossier(p.dossierId):null;
     if(old&&p.revision!==old.revision)throw Error('Dossier modifié entre-temps. Recherchez-le à nouveau.');
-    const fields=['nom_client','prenom_client','prestation','surface','adresse_chantier','adresse_facturation','frequence','notes'];
+    const fields=['nom_client','prenom_client','email_client','telephone_client','prestation','surface','adresse_chantier','adresse_facturation','frequence','notes'];
     const dossier={...(old||{}),dossierId:old?.dossierId||'DOS-'+token,sessionId:old?.sessionId||req.sessionId,revision:(old?.revision||0)+1,updatedAt:now};
     const changes=p.fields;if(!changes||typeof changes!=='object'||Array.isArray(changes))throw Error('Champs de dossier requis.');
     for(const key of Object.keys(changes))if(!fields.includes(key))throw Error('Champ de dossier inconnu : '+key);
     for(const key of fields)dossier[key]=Object.hasOwn(changes,key)?clean(changes[key],key==='notes'?2000:1000):String(old?.[key]||'');
     dossier.clientName=[dossier.prenom_client,dossier.nom_client].filter(Boolean).join(' ');
+    if(dossier.email_client&&!/^[^\s@,;<>]+@[^\s@,;<>]+\.[^\s@,;<>]+$/.test(dossier.email_client))throw Error('E-mail client invalide.');
     if(!dossier.clientName||!dossier.prestation)throw Error('Client identifiable et prestation requis ; les autres champs sont facultatifs.');
     if(!old&&dossiers.some(d=>norm(d.clientName)===norm(dossier.clientName)&&norm(d.prestation)===norm(dossier.prestation))&&!p.confirmNew)throw Error('Demande similaire existante. Recherchez le dossier ou confirmez une nouvelle demande distincte.');
     return write('dossier',dossier.dossierId,dossier,{dossier});

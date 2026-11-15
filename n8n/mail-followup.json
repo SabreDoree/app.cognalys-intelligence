@@ -1,0 +1,211 @@
+{
+  "workflowId": "DkVsfDUoyZIjCDyh",
+  "operations": [
+    {
+      "type": "updateNodeParameters",
+      "nodeName": "Service métier",
+      "parameters": {
+        "jsCode": "'use strict';\nconst UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;\nfunction normalize(raw) {\n  const p=raw.body ?? raw;\n  if(typeof p.idToken!=='string'||!p.idToken) throw Error('Connexion requise.');\n  if(!UUID.test(p.sessionId||'')) throw Error('sessionId doit être un UUID de conversation, jamais un dossierId.');\n  let params=p.params??{};\n  if(typeof params==='string') {try{params=JSON.parse(params);}catch{throw Error('Paramètres JSON invalides.');}}\n  if(!params||Array.isArray(params)||typeof params!=='object') throw Error('Paramètres invalides.');\n  if(JSON.stringify(params).length>(p.command==='settings.save'?500000:40000)) throw Error('Demande trop volumineuse.');\n  return {idToken:p.idToken,sessionId:p.sessionId,command:String(p.command||''),params,requestId:String(p.requestId||'')};\n}\nfunction legalWarnings(p,client={}){\n const missing=[];for(const [k,label] of Object.entries({companyName:'raison sociale',legalForm:'forme juridique',street:'adresse de l’entreprise',postalCode:'code postal',city:'ville',siren:'SIREN',paymentTerms:'modalités de paiement',executionTerms:'date ou délai d’exécution'}))if(!p[k])missing.push(label);\n if(p.vatMode!=='franchise'&&!p.vatNumber)missing.push('numéro de TVA');\n if(!client.adresse_facturation)missing.push('adresse du client');\n return missing;\n}\nfunction service(req, rows, token, now=new Date().toISOString()) {\n  const p=req.params, command=req.command;\n  const role=req.actor?.role||'manager';\n  if(role==='viewer'&&!['settings.get','catalog.list','dossier.list','dossier.search','quote.list','quote.find','audit.list'].includes(command))throw Error('Votre accès est en lecture seule.');\n  if(role!=='manager'&&['settings.save','catalog.save','catalog.delete'].includes(command))throw Error('Action réservée au responsable de l’entreprise.');\n  const clean=(v,max=1000)=>{if(typeof v!=='string'||v.length>max)throw Error('Texte invalide ou trop long.');return v.trim();};\n  const norm=v=>String(v??'').normalize('NFD').replace(/[\\u0300-\\u036f]/g,'').toLowerCase().trim().replace(/\\s+/g,' ');\n  const num=(v,min,max,dec=2)=>{if((typeof v!=='number'&&typeof v!=='string')||String(v).trim()===''||!/^\\d+(\\.\\d+)?$/.test(String(v)))throw Error('Nombre requis.');const n=Number(v);if(!Number.isFinite(n)||n<min||n>max||Math.abs(n*10**dec-Math.round(n*10**dec))>1e-6)throw Error('Nombre hors limites.');return n;};\n  const events=rows.filter(r=>r.scope===req.scope&&r.payload).sort((a,b)=>Number(a.id)-Number(b.id)).map(r=>{const data=JSON.parse(r.payload);const request=data._request;delete data._request;return {...r,request,data};});\n  const latest=kind=>{const m=new Map();for(const e of events.filter(e=>e.kind===kind))m.set(e.entity,e.data);return [...m.values()];};\n  const defaults={revision:0,companyName:'',companyDetails:'',street:'',addressExtra:'',postalCode:'',city:'',country:'France',legalForm:'',siren:'',siret:'',rcsCity:'',capital:'',vatMode:'standard',vatNumber:'',companyEmail:'',companyPhone:'',validityDays:30,paymentTerms:'',executionTerms:'',insuranceInfo:'',sapNumber:'',mediator:'',depositPercent:0,primaryColor:'#3E7CE0',accentColor:'#E9F0FA',logo:'',intro:'',comments:'',footer:''};\n  const settings=latest('settings')[0]||defaults;\n  const catalog=latest('catalog'), dossiers=latest('dossier'), quotes=events.filter(e=>e.kind==='quote').map(e=>e.data);\n  const headQuotes=()=>quotes.filter(q=>!quotes.some(r=>r.parentToken===q.token));\n  const current=q=>headQuotes().filter(r=>r.quoteId===q.quoteId);\n  const quoteLines=q=>q.lines.map((line,index)=>({...line,lineId:line.lineId||q.token+'-'+index}));\n  const clientEmail=q=>{\n    const dossier=dossiers.find(d=>d.dossierId===q.dossierId);\n    for(const value of [q.client?.email_client,dossier?.email_client])if(typeof value==='string'&&/^[^\\s@,;<>]+@[^\\s@,;<>]+\\.[^\\s@,;<>]+$/.test(value.trim()))return value.trim();\n    if(q.source!=='formulaire-clair-soin')return '';\n    const found=[...new Set([q.client?.notes,dossier?.notes].flatMap(notes=>[...String(notes||'').matchAll(/^E-mail\\s*:\\s*([^\\s,;<>]+@[^\\s,;<>]+\\.[^\\s,;<>]+)\\s*$/gim)].map(m=>m[1].trim())))];\n    return found.length===1?found[0]:'';\n  };\n  const decorate=q=>({...q,client:{...q.client,email_client:clientEmail(q)},lines:quoteLines(q),current:current(q).some(x=>x.token===q.token),conflict:current(q).length>1,stale:dossiers.find(d=>d.dossierId===q.dossierId)?.revision!==q.client.revision});\n  const out=result=>({result:{ok:true,...result},write:false,pdf:false});\n  const write=(kind,entity,data,result,pdf=false)=>({result:{ok:true,...result},write:true,pdf,event:{scope:req.scope,kind,entity,requestId:req.requestId,payload:JSON.stringify({...data,_audit:{action:command,actorUid:req.actor?.uid||null,actorEmail:req.actor?.email||'',source:req.source||'app',createdAt:now,entity,version:data.version||data.revision||null},_request:JSON.stringify({command,params:p})})}});\n  if(command==='audit.list')return out({events:events.filter(e=>!p.entity||e.entity===p.entity).filter(e=>e.data._audit).map(e=>({...e.data._audit,eventId:e.id})).reverse().slice(0,200)});\n  const lookup=(list,ref,fields)=>list.filter(r=>fields.some(f=>norm(r[f])&&norm(r[f])===norm(ref)));\n  const one=(list,label)=>{if(list.length!==1)throw Error(list.length?'Plusieurs '+label+' correspondent : précisez l’identifiant.':label+' introuvable dans cet espace.');return list[0];};\n  const getDossier=id=>one(dossiers.filter(d=>d.dossierId===id),'Dossier');\n  const getQuote=()=>{if(p.token)return one(quotes.filter(q=>q.token===p.token),'Devis');let found=lookup(quotes,p.ref||p.quoteId||p.dossierId,['quoteId','numero','dossierId','clientName']);if(!found.length&&p.ref){const ds=dossiers.filter(d=>[d.nom_client,d.prenom_client,d.clientName,d.dossierId].some(v=>norm(v)===norm(p.ref)));found=quotes.filter(q=>ds.some(d=>d.dossierId===q.dossierId));}if(p.version)found=found.filter(q=>q.version===Number(p.version));else if(!quotes.some(q=>norm(q.numero)===norm(p.ref)))found=found.filter(q=>headQuotes().some(h=>h.token===q.token));return one(found,'Devis');};\n  if(command==='quote.send'){\n    if(req.source!=='app'||p.confirm!==true)throw Error('Confirmez l’envoi depuis la fenêtre de l’application.');\n    if(!UUID.test(req.requestId))throw Error('Identifiant d’envoi requis.');\n    const quote=getQuote();if(!UUID.test(quote.token))throw Error('Jeton PDF invalide.');\n    const to=clean(p.to||clientEmail(quote),254),subject=clean(p.subject,200),message=clean(p.message,8000);\n    const confirmationTo=String(req.actor?.email||'').trim();\n    if(!/^[^\\s@,;<>]+@[^\\s@,;<>]+\\.[^\\s@,;<>]+$/.test(confirmationTo))throw Error('Adresse de confirmation de votre compte indisponible. Reconnectez-vous.');\n    if(!/^[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}$/.test(to)||/[\\r\\n]/.test(subject)||!subject||!message)throw Error('Destinataire, objet ou message invalide.');\n    const signature=JSON.stringify({token:quote.token,to,subject,message});\n    const prior=events.filter(e=>e.requestId===req.requestId);\n    if(prior.length){if(prior.some(e=>e.data.signature!==signature))throw Error('Identifiant d’envoi déjà utilisé pour une autre opération.');const result=prior.findLast(e=>e.kind==='mail_result'),confirmation=prior.findLast(e=>e.kind==='mail_confirmation');return out({delivery:result?result.data.status:'unknown',confirmation:confirmation?confirmation.data.status:'unknown',replayed:true});}\n    const audit={action:'quote.send_requested',actorUid:req.actor?.uid,actorEmail:req.actor?.email,source:'app',createdAt:now,entity:quote.quoteId,version:quote.version};\n    const payload={signature,to,subject,message,confirmationTo,token:quote.token,numero:quote.numero,_audit:audit};\n    return {write:false,pdf:false,mail:true,result:{ok:true},mailPlan:payload,claimEvent:{scope:req.scope,kind:'mail_claim',entity:quote.quoteId,requestId:req.requestId,payload:JSON.stringify(payload)}};\n  }\n  const isWrite=['settings.save','catalog.save','catalog.delete','dossier.save','quote.create','quote.revise'].includes(command);\n  if(isWrite){if(!UUID.test(req.requestId))throw Error('requestId UUID obligatoire.');const prior=events.find(e=>e.requestId===req.requestId);if(prior){if(prior.request!==JSON.stringify({command,params:p}))throw Error('requestId déjà utilisé pour une autre opération.');if(prior.kind!==command.split('.')[0])throw Error('requestId déjà utilisé.');return out({replayed:true,[prior.kind==='quote'?'quote':prior.kind==='settings'?'settings':prior.kind==='dossier'?'dossier':'item']:prior.kind==='quote'?decorate(prior.data):prior.data});}}\n  if(command==='settings.get')return out({settings});\n  if(command==='settings.save'){\n    if(p.revision!==settings.revision)throw Error('Paramètres modifiés entre-temps. Actualisez avant de réessayer.');\n    const next={revision:settings.revision+1};\n    for(const k of ['companyName','companyDetails','intro','comments','footer'])next[k]=clean(p[k]??'',k==='companyName'?160:3000);\n    for(const k of ['primaryColor','accentColor']){if(!/^#[0-9a-f]{6}$/i.test(p[k]||''))throw Error('Couleur hexadécimale invalide.');next[k]=p[k];}\n    const logo=p.logo??'';if(typeof logo!=='string'||logo.length>350000)throw Error('Logo trop volumineux (250 Ko maximum).');\n    if(logo){const m=logo.match(/^data:image\\/(png|jpeg);base64,([A-Za-z0-9+/]+={0,2})$/);if(!m)throw Error('Logo PNG ou JPEG requis.');const b=Buffer.from(m[2],'base64');if(b.length>256000||!(m[1]==='png'?b.subarray(0,8).toString('hex')==='89504e470d0a1a0a':b[0]===255&&b[1]===216&&b[2]===255))throw Error('Fichier logo invalide.');}\n    const textFields=['street','addressExtra','postalCode','city','legalForm','siren','siret','rcsCity','vatNumber','companyEmail','companyPhone','paymentTerms','executionTerms','insuranceInfo','sapNumber','mediator'];\n    for(const k of textFields)next[k]=clean(p[k]??'',k.endsWith('Terms')||k==='insuranceInfo'||k==='mediator'?1500:160);\n    next.country='France';next.companyDetails='';\n    if(!next.companyName||!next.street||!next.city||!/^\\d{5}$/.test(next.postalCode))throw Error('Nom, adresse, code postal français à cinq chiffres et ville requis.');\n    if(!['EI','SAS','SASU','SARL','EURL','SA','SNC','Association','Autre'].includes(next.legalForm))throw Error('Forme juridique requise.');\n    const luhn=s=>[...s].reverse().reduce((a,c,i)=>{let v=Number(c)*(i%2?2:1);return a+(v>9?v-9:v)},0)%10===0;\n    if(!/^\\d{9}$/.test(next.siren)||/^0{9}$/.test(next.siren)||!luhn(next.siren))throw Error('SIREN invalide : neuf chiffres et clé de contrôle requis.');\n    if(next.siret&&(!/^\\d{14}$/.test(next.siret)||!next.siret.startsWith(next.siren)||!luhn(next.siret)))throw Error('SIRET invalide ou différent du SIREN.');\n    const company=['SAS','SASU','SARL','EURL','SA','SNC'].includes(next.legalForm);\n    next.capital=company?num(p.capital,0,100000000000):'';\n    if(company&&!next.rcsCity)throw Error('Ville du RCS requise pour une société commerciale.');\n    if(!['standard','franchise'].includes(p.vatMode))throw Error('Choisissez le régime de TVA.');next.vatMode=p.vatMode;\n    if(next.vatMode==='standard'&&(!/^FR[A-Z0-9]{2}\\d{9}$/.test(next.vatNumber)||!next.vatNumber.endsWith(next.siren)))throw Error('Numéro de TVA français requis et cohérent avec le SIREN.');\n    if(next.vatMode==='standard'&&/^FR[0-9]{2}/.test(next.vatNumber)&&Number(next.vatNumber.slice(2,4))!==((12+3*(Number(next.siren)%97))%97))throw Error('Clé de contrôle du numéro de TVA incohérente.');\n    if(next.companyEmail&&!/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(next.companyEmail))throw Error('E-mail de l’entreprise invalide.');\n    next.validityDays=num(p.validityDays,1,365,0);next.depositPercent=num(p.depositPercent??0,0,100);\n    if(!next.paymentTerms||!next.executionTerms)throw Error('Modalités de paiement et date ou délai d’exécution requis.');\n    next.logo=logo;return write('settings','company',next,{settings:next});\n  }\n  if(command==='catalog.list')return out({items:catalog.filter(x=>!x.deleted)});\n  if(command==='catalog.save'||command==='catalog.delete'){\n    const old=p.id?one(catalog.filter(c=>c.id===p.id&&!c.deleted),'Désignation'):null;\n    if(old&&p.revision!==old.revision)throw Error('Catalogue modifié entre-temps. Rechargez avant d’enregistrer.');\n    if(command==='catalog.delete'){\n      if(quotes.some(q=>q.lines.some(l=>l.catalogId===old.id)))throw Error('Désignation utilisée : désactivez-la pour conserver son historique.');\n      const item={...old,deleted:true,active:false,revision:old.revision+1};return write('catalog',item.id,item,{item});\n    }\n    const label=clean(p.label,160),description=clean(p.description??'',1000),unit=clean(p.unit,30);\n    if(!label||!unit)throw Error('Libellé et unité requis.');\n    const item={id:old?.id||'CAT-'+token,label,description,unit,price:num(p.price,0,1000000),vat:num(p.vat,0,100),active:p.active!==false,revision:(old?.revision||0)+1,deleted:false};\n    return write('catalog',item.id,item,{item});\n  }\n  if(command==='dossier.list')return out({dossiers});\n  if(command==='dossier.search'){\n    const result=lookup(dossiers,clean(p.ref||'',160),['dossierId','nom_client','prenom_client','clientName']);\n    return out({status:result.length===1?'trouve':result.length?'ambigu':'introuvable',dossiers:result});\n  }\n  if(command==='dossier.save'){\n    const old=p.dossierId?getDossier(p.dossierId):null;\n    if(old&&p.revision!==old.revision)throw Error('Dossier modifié entre-temps. Recherchez-le à nouveau.');\n    const fields=['nom_client','prenom_client','email_client','telephone_client','prestation','surface','adresse_chantier','adresse_facturation','frequence','notes'];\n    const dossier={...(old||{}),dossierId:old?.dossierId||'DOS-'+token,sessionId:old?.sessionId||req.sessionId,revision:(old?.revision||0)+1,updatedAt:now};\n    const changes=p.fields;if(!changes||typeof changes!=='object'||Array.isArray(changes))throw Error('Champs de dossier requis.');\n    for(const key of Object.keys(changes))if(!fields.includes(key))throw Error('Champ de dossier inconnu : '+key);\n    for(const key of fields)dossier[key]=Object.hasOwn(changes,key)?clean(changes[key],key==='notes'?2000:1000):String(old?.[key]||'');\n    dossier.clientName=[dossier.prenom_client,dossier.nom_client].filter(Boolean).join(' ');\n    if(dossier.email_client&&!/^[^\\s@,;<>]+@[^\\s@,;<>]+\\.[^\\s@,;<>]+$/.test(dossier.email_client))throw Error('E-mail client invalide.');\n    if(!dossier.clientName||!dossier.prestation)throw Error('Client identifiable et prestation requis ; les autres champs sont facultatifs.');\n    if(!old&&dossiers.some(d=>norm(d.clientName)===norm(dossier.clientName)&&norm(d.prestation)===norm(dossier.prestation))&&!p.confirmNew)throw Error('Demande similaire existante. Recherchez le dossier ou confirmez une nouvelle demande distincte.');\n    return write('dossier',dossier.dossierId,dossier,{dossier});\n  }\n  if(command==='quote.list')return out({quotes:(p.history?quotes:headQuotes()).map(decorate).reverse()});\n  if(command==='quote.find') {const quote=decorate(getQuote());return out({quote});}\n  if(command==='quote.create'||command==='quote.revise'){\n    const old=command==='quote.revise'?getQuote():null;\n    if(old&&(!decorate(old).current||decorate(old).conflict)){const heads=current(old);return {result:{ok:false,error:'Version ancienne ou ambiguë. Relire quote.find avec le quoteId sans suffixe de version avant correction.',quoteId:old.quoteId,currentQuote:heads.length===1?decorate(heads[0]):null},write:false,pdf:false};}\n    const dossier=getDossier(old?.dossierId||p.dossierId);\n    const presentation=old?.documentType==='estimate'?{...old.presentation}:settings;\n    const client={...(old&&old.client.revision===dossier.revision?old.client:dossier)};\n    if(p.clientFields!==undefined){\n      if(!old||!p.clientFields||Array.isArray(p.clientFields)||typeof p.clientFields!=='object')throw Error('Corrections client invalides.');\n      const allowed=['nom_client','prenom_client','email_client','telephone_client','prestation','surface','adresse_chantier','adresse_facturation','frequence','notes'];\n      for(const key of Object.keys(p.clientFields)){if(!allowed.includes(key))throw Error('Champ client inconnu : '+key);client[key]=clean(p.clientFields[key],key==='notes'?2000:1000);}\n      if(!client.nom_client||!client.prestation)throw Error('Nom et prestation requis.');\n      if(client.email_client&&!/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(client.email_client))throw Error('E-mail client invalide.');\n      client.clientName=[client.prenom_client,client.nom_client].filter(Boolean).join(' ');\n    }\n    if(old&&(old.presentation?.vatMode||'standard')!==(presentation.vatMode||'standard'))throw Error('Le régime de TVA a changé : créez un nouveau devis pour recalculer toutes ses lignes.');\n    let lines;\n    const makeLine=(l,index)=>{\n      const c=one(catalog.filter(c=>c.id===l.catalogId&&!c.deleted&&c.active),'Désignation active');\n      const quantity=num(l.quantity,0.001,1000000,3),price=c.price,vat=presentation.vatMode==='franchise'?0:c.vat;\n      const ht=Math.round(Math.round(quantity*1000)*Math.round(price*100)/1000),tax=Math.round(ht*Math.round(vat*100)/10000);\n      if(ht>100000000000)throw Error('Montant de ligne trop élevé.');\n      return {lineId:token+'-'+index,catalogId:c.id,catalogRevision:c.revision,label:c.label,description:c.description,unit:c.unit,quantity,price,vat,htCents:ht,vatCents:tax};\n    };\n    if(old){\n      lines=quoteLines(old);\n      if(p.quantities){for(const change of p.quantities){const l=one(lines.filter(l=>l.lineId===change.lineId),'Ligne');l.quantity=num(change.quantity,0.001,1000000,3);l.htCents=Math.round(Math.round(l.quantity*1000)*Math.round(l.price*100)/1000);l.vatCents=Math.round(l.htCents*Math.round(l.vat*100)/10000);}}\n      if(p.removeLineIds){if(!Array.isArray(p.removeLineIds))throw Error('Liste de lignes invalide.');for(const id of p.removeLineIds)one(lines.filter(l=>l.lineId===id),'Ligne');lines=lines.filter(l=>!p.removeLineIds.includes(l.lineId));}\n      if(p.lineChanges){\n        if(!Array.isArray(p.lineChanges))throw Error('Corrections de lignes invalides.');\n        for(const change of p.lineChanges){\n          const l=one(lines.filter(l=>l.lineId===change.lineId),'Ligne');\n          for(const [key,max] of [['label',160],['description',1000],['unit',30]])if(Object.hasOwn(change,key))l[key]=clean(change[key],max);\n          if(!l.label||!l.unit)throw Error('Désignation et unité requises.');\n          if(Object.hasOwn(change,'price'))l.price=num(change.price,0,1000000);\n          if(Object.hasOwn(change,'vat'))l.vat=num(change.vat,0,100);\n          if(presentation.vatMode==='franchise'&&l.vat!==0)throw Error('La franchise de TVA impose un taux nul.');\n          l.htCents=Math.round(Math.round(l.quantity*1000)*Math.round(l.price*100)/1000);\n          if(l.htCents>100000000000)throw Error('Montant de ligne trop élevé.');\n          l.vatCents=Math.round(l.htCents*Math.round(l.vat*100)/10000);\n        }\n      }\n      if(p.addLines){if(!Array.isArray(p.addLines))throw Error('Lignes invalides.');lines.push(...p.addLines.map(makeLine));}\n    }else{if(!Array.isArray(p.lines))throw Error('Sélectionnez les désignations et quantités.');lines=p.lines.map(makeLine);}\n    if(!lines.length||lines.length>50)throw Error('Le devis doit comporter entre 1 et 50 lignes chiffrées.');\n    for(const line of lines){num(line.quantity,0.001,1000000,3);if(!Number.isFinite(line.htCents)||!Number.isFinite(line.vatCents))throw Error('Complétez les quantités et les montants avant de créer une nouvelle version.');}\n    const htCents=lines.reduce((s,l)=>s+l.htCents,0),vatCents=lines.reduce((s,l)=>s+l.vatCents,0);\n    const quoteId=old?.quoteId||'DEV-'+now.slice(0,10).replace(/-/g,'')+'-'+token.replace(/-/g,'').slice(0,12).toUpperCase();\n    const version=(old?.version||0)+1;\n    const quote={...(old?.documentType==='estimate'?{documentType:'estimate',title:old.title,source:old.source||'formulaire-clair-soin'}:{}),missingInformation:legalWarnings(presentation,client),validUntil:new Date(new Date(now).getTime()+(presentation.validityDays||30)*86400000).toISOString(),presentation:JSON.parse(JSON.stringify(presentation)),quoteId,numero:quoteId+'-V'+version,token,version,parentToken:old?.token||null,dossierId:client.dossierId,clientName:client.clientName,client:{...client},sessionId:req.sessionId,createdAt:now,lines,htCents,vatCents,ttcCents:htCents+vatCents,status:'brouillon',reason:clean(p.reason||'Création',500)};\n    return write('quote',quoteId,quote,{quote:{...quote,current:true,conflict:false,stale:false}},true);\n  }\n  throw Error('Commande inconnue.');\n}\n\n\ntry {const req=$('Espace privé').first().json;if(req.command==='settings.save'){const check=$('Vérifier commune').first().json;if(!check.valid)throw Error(check.error);}req.requestId=req.requestId||$('Jeton version').first().json.token;return [{json:service(req,$('Lire espace').all().map(i=>i.json),$('Jeton version').first().json.token)}];} catch(e){return [{json:{result:{ok:false,error:e.message},write:false,pdf:false}}];}\n\n"
+      }
+    },
+    {
+      "type": "addNode",
+      "node": {
+        "name": "Confirmer à l’expéditeur ?",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.2,
+        "position": [
+          3500,
+          900
+        ],
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "typeValidation": "strict"
+            },
+            "conditions": [
+              {
+                "leftValue": "={{ JSON.parse($('Préparer résultat envoi').first().json.payload).status === 'accepted' }}",
+                "rightValue": true,
+                "operator": {
+                  "type": "boolean",
+                  "operation": "true"
+                }
+              }
+            ],
+            "combinator": "and"
+          }
+        }
+      }
+    },
+    {
+      "type": "addNode",
+      "node": {
+        "name": "Confirmation expéditeur SMTP",
+        "type": "n8n-nodes-base.emailSend",
+        "typeVersion": 2.1,
+        "position": [
+          3700,
+          900
+        ],
+        "credentials": {
+          "smtp": {
+            "id": "x2LmIuFQ7aSXHAfP",
+            "name": "SMTP account"
+          }
+        },
+        "parameters": {
+          "resource": "email",
+          "operation": "send",
+          "fromEmail": "cognalysintelligence@gmail.com",
+          "toEmail": "={{ $('Service métier').first().json.mailPlan.confirmationTo }}",
+          "subject": "={{ 'Vous avez envoyé un devis · '+$('Service métier').first().json.mailPlan.numero }}",
+          "emailFormat": "text",
+          "text": "={{ 'Bonjour,\\n\\nVous avez envoyé le devis '+$('Service métier').first().json.mailPlan.numero+' à '+$('Service métier').first().json.mailPlan.to+'.\\n\\nObjet : '+$('Service métier').first().json.mailPlan.subject+'\\n\\nLe serveur SMTP a accepté cet envoi. Cette confirmation ne constitue pas une preuve de réception par le client.\\n\\nCognalys Intelligence' }}",
+          "options": {
+            "appendAttribution": false
+          }
+        }
+      }
+    },
+    {
+      "type": "addNode",
+      "node": {
+        "name": "Résultat confirmation expéditeur",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          3900,
+          900
+        ],
+        "parameters": {
+          "mode": "runOnceForAllItems",
+          "jsCode": "const p=$('Service métier').first().json,r=$input.first().json;const accepted=Array.isArray(r.accepted)&&r.accepted.some(a=>String(a).toLowerCase()===p.mailPlan.confirmationTo.toLowerCase());return [{json:{...p.claimEvent,kind:'mail_confirmation',payload:JSON.stringify({signature:p.mailPlan.signature,status:accepted?'accepted':'unknown',_audit:{...p.mailPlan._audit,action:accepted?'quote.confirmation_sent':'quote.confirmation_unknown',createdAt:new Date().toISOString()}})}}];"
+        }
+      }
+    },
+    {
+      "type": "addNode",
+      "node": {
+        "name": "Archiver confirmation expéditeur",
+        "type": "n8n-nodes-base.dataTable",
+        "typeVersion": 1.1,
+        "position": [
+          4100,
+          900
+        ],
+        "parameters": {
+          "resource": "row",
+          "operation": "insert",
+          "dataTableId": {
+            "__rl": true,
+            "mode": "id",
+            "value": "8aCc7MSHqBrdBtGH"
+          },
+          "columns": {
+            "mappingMode": "autoMapInputData",
+            "value": {},
+            "schema": [
+              {
+                "id": "scope",
+                "displayName": "scope",
+                "type": "string",
+                "display": true,
+                "required": false
+              },
+              {
+                "id": "kind",
+                "displayName": "kind",
+                "type": "string",
+                "display": true,
+                "required": false
+              },
+              {
+                "id": "entity",
+                "displayName": "entity",
+                "type": "string",
+                "display": true,
+                "required": false
+              },
+              {
+                "id": "requestId",
+                "displayName": "requestId",
+                "type": "string",
+                "display": true,
+                "required": false
+              },
+              {
+                "id": "payload",
+                "displayName": "payload",
+                "type": "string",
+                "display": true,
+                "required": false
+              }
+            ]
+          },
+          "options": {}
+        }
+      }
+    },
+    {
+      "type": "removeConnection",
+      "source": "Archiver résultat envoi",
+      "target": "Répondre envoi",
+      "connectionType": "main"
+    },
+    {
+      "type": "addConnection",
+      "source": "Archiver résultat envoi",
+      "target": "Confirmer à l’expéditeur ?",
+      "connectionType": "main"
+    },
+    {
+      "type": "addConnection",
+      "source": "Confirmer à l’expéditeur ?",
+      "target": "Confirmation expéditeur SMTP",
+      "sourceIndex": 0,
+      "connectionType": "main"
+    },
+    {
+      "type": "addConnection",
+      "source": "Confirmer à l’expéditeur ?",
+      "target": "Répondre envoi",
+      "sourceIndex": 1,
+      "connectionType": "main"
+    },
+    {
+      "type": "addConnection",
+      "source": "Confirmation expéditeur SMTP",
+      "target": "Résultat confirmation expéditeur",
+      "connectionType": "main"
+    },
+    {
+      "type": "addConnection",
+      "source": "Résultat confirmation expéditeur",
+      "target": "Archiver confirmation expéditeur",
+      "connectionType": "main"
+    },
+    {
+      "type": "addConnection",
+      "source": "Archiver confirmation expéditeur",
+      "target": "Répondre envoi",
+      "connectionType": "main"
+    },
+    {
+      "type": "updateNodeParameters",
+      "nodeName": "Répondre envoi",
+      "parameters": {
+        "jsCode": "const p=$('Préparer résultat envoi').first().json,row=$input.first().json;if(!['mail_result','mail_confirmation'].includes(row.kind)||row.requestId!==p.requestId)throw Error('Résultat d’envoi non archivé. Consultez l’historique.');return [{json:{ok:true,delivery:JSON.parse(p.payload).status,confirmation:row.kind==='mail_confirmation'?JSON.parse(row.payload).status:'not_sent'}}];"
+      }
+    },
+    {
+      "type": "setNodeSettings",
+      "nodeName": "Confirmation expéditeur SMTP",
+      "settings": {
+        "onError": "continueRegularOutput",
+        "retryOnFail": false
+      }
+    }
+  ]
+}
